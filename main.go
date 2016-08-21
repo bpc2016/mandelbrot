@@ -43,7 +43,7 @@ func main() {
 
 // display the base html
 func handler_init(w http.ResponseWriter, r *http.Request) {
-	setCoords()
+	InitPoints()
 	ReadQueryString(r) // handle the querystring
 	// note the use of backtick!!
 	w.Write([]byte(`
@@ -72,28 +72,33 @@ clr: <input type="text" size=3 name="col">
 </html>`))
 }
 
-// return a mandelbrot image
+// return a Mandelbrot image
 func handler_image(w http.ResponseWriter, r *http.Request) {
-	ReadQueryString(r)  // handle the querystring
-	SendImage(w) // fetch the base64 encoded png image
+	ReadQueryString(r) // handle the querystring
+	SendImage(w)       // fetch the base64 encoded png image
 }
 
 const (
-	width, height = 1024, 1024
-	N             = 1024 * 1024 // number of pixels
+	width, height = 1024, 512
+	N             = width * height // number of pixels
 )
 
+type Point struct {
+	Right int // right from TL corner (0,0)
+	Down  int // down from ""
+}
+
 var (
-	x           [N]int
-	y           [N]int
-	perm        [N]int
-	position    = 0
-	rate        = 128               // how quickly we process - default if we dont  ?r=345 etc
-	num         = 1                 // multiples of 600
-	numberOfroutines         = 4                 // number of concurrent go routines
-	cx, cy, rad = -0.73, 0.23, 0.02 // x0=cx-rad, y0=cy-rad
-	col         = 1256.0            // color
-	options     = map[string]int{
+	perm             [N]int
+	Pixel            [N]Point // all the screen points
+	position         = 0
+	rate             = 64          // how quickly we process - default if we dont  ?r=345 etc
+	num              = 5           // multiples of 600
+	numberOfroutines = 2           // number of concurrent go routines
+	cx, cy           = -0.73, 0.23 // x, y coords of central point pixel (width/2,height/2)
+	hScale           = 0.02        // hScale = cx-0
+	col              = 1256.0      // color
+	options          = map[string]int{
 		"m": 1, "r": 1, "num": 1, // 1 = int, 2 = float
 		"x": 2, "y": 2, "w": 2,
 		"dpx": 1, "dpy": 1,
@@ -102,17 +107,18 @@ var (
 	}
 )
 
-func setCoords() {
-	//fill our coordinate arrays
+// InitPoints fills the screen pixels array Pixel
+// and generates permutation perm
+func InitPoints() {
 	k := 0
-	for iy := 0; iy < height; iy++ {
-		for ix := 0; ix < width; ix++ {
-			x[k] = ix
-			y[k] = iy
+	for down := 0; down < height; down++ {
+		for right := 0; right < width; right++ {
+			Pixel[k] = Point{right, down}
 			k++
 		}
 	}
-	perm = randPermutation() // set up the permutation
+
+	perm = randPermutation()
 	position = 0
 }
 
@@ -156,33 +162,33 @@ func ReadQueryString(r *http.Request) {
 		case "y":
 			cy = z // global var center y coord
 		case "w":
-			rad = z // global var half a side
+			hScale = z // global var half a side
 		case "dpx":
 			if position == 0 {
-				cx = cx + rad*float64(n-512)/float64(512)
+				cx = cx + hScale*float64(2*n-width)/float64(width)
 				fmt.Println("new cx = ", cx)
 			}
 		case "dpy":
 			if position == 0 {
-				cy = cy + rad*float64(512-n)/float64(512)
+				vScale := hScale * (float64(height) / float64(width))
+				cy = cy + vScale*float64(height-2*n)/float64(height)
 				fmt.Println("new cy = ", cy)
 			}
 		case "in":
 			if position == 0 {
-				rad = rad * 3 / 4
-				fmt.Println("new rad = ", rad)
+				hScale = hScale * 3 / 4
+				fmt.Println("new hScale = ", hScale)
 			}
 		case "out":
 			if position == 0 {
-				rad = 2 * rad
-				fmt.Println("new rad = ", rad)
+				hScale = 2 * hScale
+				fmt.Println("new hScale = ", hScale)
 			}
 		case "col":
 			col = z // change the hue
 		}
 	}
 }
-
 
 func SendImage(w io.Writer) {
 	if position == N { // complete we are done, send this banner to js
@@ -191,74 +197,79 @@ func SendImage(w io.Writer) {
 		return
 	}
 
-	lastIndex := stopAt(rate,position)
-	
+	lastIndex := stopAt(rate, position)
+
 	screenChan := make(chan image.Image)
 
 	// set the partial image go routines going
-	for i := 0; i < numberOfroutines; i++ {
-		go BuildImage(lastIndex, numberOfroutines, i, screenChan)
+	for gor := 0; gor < numberOfroutines; gor++ {
+		go BuildImage(lastIndex, gor, screenChan)
 	}
 
+	var canvas *image.RGBA
+
 	// assemble the image
-	img0 := image.NewRGBA(image.Rect(0, 0, width, height))
+	canvas = image.NewRGBA(image.Rect(0, 0, width, height))
 	count := 0
 	op := draw.Src
 	for img := range screenChan {
-		draw.Draw(img0, img0.Bounds(), img, image.ZP, op)
+		draw.Draw(canvas, canvas.Bounds(), img, image.ZP, op)
 		if op == draw.Src { // switch the drawing operation one time
 			op = draw.Over
-		} 
+		}
 		count++
 		if count == numberOfroutines {
 			close(screenChan)
 		}
 	}
 
-	// the assembly loop had blocked, and now we process result for writer w
-	position = lastIndex                   // update starting point for next partial
+	// the assembly loop had blocked, and now we process result ....
+	Encode(w, canvas) // write the binary to writer w
 
+	position = lastIndex // update starting point for next partial
+}
+
+// Encode take image, first PNG encodes it then
+// writes its Base64 encoding to writer w
+func Encode(w io.Writer, image *image.RGBA) {
 	buf := new(bytes.Buffer)
-	png.Encode(io.Writer(buf), img0) // NOTE: ignoring errors, to an io.Writer
-
-	// convert to base64
+	png.Encode(io.Writer(buf), image) // NOTE: ignoring errors, to an io.Writer
+	// convert to Base64
 	encoder := base64.NewEncoder(base64.StdEncoding, w) // send to target w
 	encoder.Write(buf.Bytes())
 	encoder.Close()
 }
 
-func stopAt(rate, position int) int {
-	if rate == 0 {
-		rate = 256
+// stopAt returns the last index for points given
+// the 'rate' factor (which decides refresh) and
+// current index pos along points list
+func stopAt(factor, pos int) int {
+	if factor == 0 {
+		factor = 256
 	}
-	lastInd := position + 1024*rate
-	fmt.Print("Rate = ", rate, ", position = ", position, "\n")
-	//fmt.Print("cx = ",cx,", cy = ",cy,", rad = ",rad,"\n")
+	lastInd := pos + 1024*factor
+	// fmt.Print("Rate = ", factor, ", position = ", pos, "\n")
 	if lastInd > N {
 		lastInd = N
 	}
-	return lastInd	
+	return lastInd
 }
 
-type Point struct{
-	Right int	// right from TL corner (0,0)
-	Down int	// down from ""
-}
-
-// BuildImage generates a partial image of the Mandelbrot set and sends 
+// BuildImage generates a partial image of the Mandelbrot set and sends
 // this to screenChan
-func BuildImage(lastIndex int, base int, part int, screenChan chan image.Image) {
+func BuildImage(lastIndex int, part int, screenChan chan image.Image) {
 	img := image.NewRGBA(image.Rect(0, 0, width, height))
 	draw.Draw(img, img.Bounds(), image.Transparent, image.ZP, draw.Src)
 
 	for k := position; k < lastIndex; k++ {
-		if k%base != part {
+		if k%numberOfroutines != part { // choose our residue class
 			continue
-		} // choose our residue class
+		}
 		P := NextPoint(k)
 		z := Point2C(P)
 		img.Set(P.Right, height-P.Down, GetColor(z))
 	}
+
 	screenChan <- img
 }
 
@@ -267,7 +278,7 @@ func BuildImage(lastIndex int, base int, part int, screenChan chan image.Image) 
 func SendBanner(w io.Writer) {
 	sx := strconv.FormatFloat(cx, 'f', -1, 64)
 	sy := strconv.FormatFloat(cy, 'f', -1, 64)
-	sr := strconv.FormatFloat(rad, 'f', -1, 64)
+	sr := strconv.FormatFloat(hScale, 'f', -1, 64)
 	si := strconv.Itoa(num)
 	st := strconv.Itoa(rate)
 	sm := strconv.Itoa(numberOfroutines)
@@ -278,21 +289,28 @@ func SendBanner(w io.Writer) {
 // NextPoint returns the point on the screen
 // parametrized by k, using our randomization
 func NextPoint(k int) Point {
-		rk := perm[k] // randomize
-		return Point{x[rk], y[rk]}
+	m := perm[k] // randomize
+	return Pixel[m]
 }
 
 // P2C converts a pixel point Q to
 // a complex number
-func Point2C(Q Point) complex128 {
-	px := Q.Right
-	py := Q.Down
-	side := 2 * rad
-	rx := cx - rad + float64(px)/width*side
-	ry := cy - rad + float64(py)/height*side
+func Point2C(p Point) complex128 {
+	pr := float64(p.Right)
+	pd := float64(p.Down)
+
+	wid := float64(width)
+	rx := cx + (pr-wid/2)*(hScale/wid)
+
+	het := float64(height)
+	vScale := hScale * (het / wid)
+	ry := cy + (pd-het/2)*(vScale/het)
+	// hside := 2 * hScale
+	// vside := 2 * vScale
+	// rx := cx - hScale + float64(pr)/width*hside
+	// ry := cy - vScale + float64(pd)/height*vside
 	return complex(rx, ry)
 }
-
 
 // GetColor runs the Mandelbrot iteration from point z
 // it returns a color for the point dependent on how many
