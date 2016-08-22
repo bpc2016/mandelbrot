@@ -5,7 +5,7 @@ import (
 	"testing"
 )
 
-func TestPxColor(t *testing.T) {
+func TestInterPolate(t *testing.T) {
 	// testbytes := []byte("teststring")
 	// expected := "85e63514d692e0136925bec920b4ac50c297c36774587c2ec2b86e8075001e73"
 
@@ -17,6 +17,7 @@ func TestPxColor(t *testing.T) {
 	// if hash_str != expected {
 	// 	t.Errorf("expected %s but got %s", expected, hash)
 	// }
-	w := PxColor(2400)
-	fmt.Printf("test got %v",w)
+	//w := PxColor(2400)
+	Rainbow := MakePalette()
+	fmt.Printf("test got %+v",Rainbow[1])
 }

@@ -8,6 +8,7 @@ import (
 	"image"
 	"image/draw"
 	"image/png"
+	"image/color"
 	"io"
 	"log"
 	"math/rand"
@@ -17,7 +18,6 @@ import (
 	"math/cmplx"
 	"mandelbrot/html"
 	"mandelbrot/rgba"
-	//"mark/rgb"
 )
 
 func main() {
@@ -210,6 +210,8 @@ func resetEnd(pos, refresh int) int {
 	return lastInd
 }
 
+var Rainbow []color.RGBA // length = 1530
+
 // BuildImage generates a partial image of the Mandelbrot set and sends
 // this to screenChan. This is called in a goroutine indexed by part <= numberOfgoroutines
 // and draws a selection of the pixels. lastIndex is the point where we stop
@@ -225,18 +227,11 @@ func BuildImage(part int, lastIndex int, screenChan chan image.Image) {
 		p := NextPoint(k)
 		z := Point2C(p)
 		d := mandelBrot(z)
-		img.Set(p.Right, height-p.Down, rgba.PxColor(d))
+		img.Set(p.Right, height-p.Down, Rainbow[(d*10)%1530]) //  rgba.PxColor(d))
 	}
 
 	screenChan <- img
 }
-
-// func mandelColor(n int) string {
-// 	if n == tookTooLong {
-// 		return CSSblack
-// 	}
-// 	return CSSRainbow[n%len(CSSRainbow)]
-// }
 
 // mandelBrot performs the iteration from point z
 // returning the number of iterations for an escape otherwise
@@ -307,9 +302,6 @@ func randPermutation() [N]int {
 	return v
 }
 
-// var CSSRainbow = make([]string, 0)
-// var CSSwhite = "#ffffff"
-// var CSSblack = "#000000"
 
 func init() {
 	k := 0
@@ -319,24 +311,11 @@ func init() {
 			k++
 		}
 	}
-	// for _, c := range rgb.Rainbow {
-	// 	CSSRainbow = append(CSSRainbow, fmt.Sprintf("#%02x%02x%02x", c.R, c.G, c.B))
-	// }
+	
 	perm = randPermutation()
 	position = 0
-	//fmt.Println("INIT: wheel size:", len(CSSRainbow))
-}
-/*
-	localhost:8000
-	generates a *color* 1024x1024 mandelbrot progressively
-	numberOfroutinesify
-	refresh rate (r),
-	iterations (num),
-	square size (w),
-	number of goroutines (m),
-	color distribution (col)
-	- you may wish to set r to a power of 2
-   // http://localhost:8000/?x=-0.727650183203125&y=0.2136008193359375&w=0.0000003375&num=160&r=64&m=7&col=1.2
-  //http://localhost:8000/?x=-0.7221093749999999&y=0.24281250000000001&w=0.02&num=1&r=128&m=4&col=-120
-*/
+
+	Rainbow = rgba.MakePalette()
 	
+	fmt.Println("INIT called")
+}
