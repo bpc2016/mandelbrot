@@ -12,12 +12,11 @@ import (
 	"io"
 	"log"
 	"mandelbrot/html"
+	"mandelbrot/math"
 	"mandelbrot/rgba"
 	"math/cmplx"
-	"math/rand"
 	"net/http"
 	"strconv"
-	"time"
 )
 
 func main() {
@@ -271,23 +270,6 @@ func Point2C(p Point) complex128 {
 	return complex(rx, ry)
 }
 
-func randPermutation() [N]int {
-	t := time.Now().Nanosecond()
-	rand.Seed(int64(t))
-
-	var v [N]int
-	for i, _ := range v {
-		v[i] = i // we will start from 0, of course
-	}
-	for i := 0; i < N-1; i++ {
-		j := rand.Intn(N-i) + i // now i <= j <= N-1
-		h := v[j]
-		v[j] = v[i]
-		v[i] = h //swap v_i,v_j
-	}
-	return v
-}
-
 func init() {
 	k := 0
 	for down := 0; down < height; down++ {
@@ -297,12 +279,12 @@ func init() {
 		}
 	}
 
-	perm := randPermutation()
+	permutation := math.RandPermutation(N)
 	Sigma = func(d int) int {
 		if d < 0 || d >= N {
 			panic(fmt.Sprintf("can't handle % in permutation", d))
 		}
-		return perm[d]
+		return permutation[d]
 	}
 
 	position = 0 // for partial image creation
