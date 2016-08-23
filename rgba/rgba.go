@@ -61,21 +61,19 @@ var diffArray = []int{
 	-0x1,     // {0, 0, -1},
 }
 
-
 func MakePalette() []color.RGBA {
-	var a = [3]uint8{};
-	v:= 0xff0000 	// <--> {255, 0, 0}
+	var a = [3]uint8{}
+	v := 0xff0000 // <--> {255, 0, 0}
 	r := []color.RGBA{}
-	for i:=0;i<6;i++{
-		for j:=0;j<255;j++{
+	for i := 0; i < 6; i++ {
+		for j := 0; j < 255; j++ {
 			a = base256(v)
-			r = append(r,color.RGBA{a[0],a[1],a[2],255})
+			r = append(r, color.RGBA{a[0], a[1], a[2], 255})
 			v += diffArray[i]
 		}
 	}
 	return r
 }
-
 
 func PxColor3(duration int) color.Color {
 	if duration == 0 { // tookTooLong
@@ -134,9 +132,9 @@ func codeColors(c [3]int) int {
 func base256(v int) [3]uint8 {
 	const B = 1 << 8 // 256
 	var ww [3]uint8
-	ww[0] = uint8(v>>16)
-	ww[1] = uint8((v>>8)%B)
-	ww[2] = uint8(v%B)
+	ww[0] = uint8(v >> 16)
+	ww[1] = uint8((v >> 8) % B)
+	ww[2] = uint8(v % B)
 
 	return ww
 }

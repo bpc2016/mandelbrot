@@ -6,31 +6,30 @@ import (
 	"encoding/base64"
 	"fmt"
 	"image"
+	"image/color"
 	"image/draw"
 	"image/png"
-	"image/color"
 	"io"
 	"log"
+	"mandelbrot/html"
+	"mandelbrot/rgba"
+	"math/cmplx"
 	"math/rand"
 	"net/http"
 	"strconv"
 	"time"
-	"math/cmplx"
-	"mandelbrot/html"
-	"mandelbrot/rgba"
 )
 
 func main() {
-	http.HandleFunc("/", handler_init)        
+	http.HandleFunc("/", handler_init)
 	http.HandleFunc("/image/", handler_image)
 	http.Handle("/static/",
-	 	http.StripPrefix("/static/", http.FileServer(http.Dir("."))))
+		http.StripPrefix("/static/", http.FileServer(http.Dir("."))))
 	log.Fatal(http.ListenAndServe("localhost:8000", nil))
 }
 
 // display the base html
 func handler_init(w http.ResponseWriter, r *http.Request) {
-	//InitPoints()
 	ReadQueryString(r) // handle the querystring
 	w.Write([]byte(html.UI))
 }
@@ -44,7 +43,7 @@ func handler_image(w http.ResponseWriter, r *http.Request) {
 const (
 	width, height = 1024, 512
 	N             = width * height // number of pixels
-	tookTooLong   = 0 			   // flag failure, color Black
+	tookTooLong   = 0              // flag failure, color Black
 )
 
 type Point struct {
@@ -53,12 +52,13 @@ type Point struct {
 }
 
 var (
-	perm             [N]int
+	Color            func(d int) color.RGBA
+	Sigma            func(d int) int
 	Pixel            [N]Point // all the screen points
 	position         = 0
 	rate             = 64          // how quickly we process - default if we dont  ?r=345 etc
 	num              = 5           // multiples of 600
-	iterations		 = 3000		   //  always 600 x  TODO kill one of these two
+	iterations       = 3000        //  always 600 x  TODO kill one of these two
 	numberOfroutines = 2           // number of concurrent go routines
 	cx, cy           = -0.73, 0.23 // x, y coords of central point pixel (width/2,height/2)
 	hScale           = 0.02        // hScale = cx-0
@@ -71,8 +71,6 @@ var (
 		"col": 2,
 	}
 )
-
-
 
 func ReadQueryString(r *http.Request) {
 	if err := r.ParseForm(); err != nil {
@@ -149,8 +147,8 @@ func SendImage(w io.Writer) {
 		return
 	}
 
-	iterations = num * 600           	// we scale the given iterations
-	rgba.SetPalette(num,col)			// set range and hue palette
+	iterations = num * 600    // we scale the given iterations
+	rgba.SetPalette(num, col) // set range and hue palette
 	lastIndex := resetEnd(position, rate)
 
 	screenChan := make(chan image.Image)
@@ -168,8 +166,8 @@ func SendImage(w io.Writer) {
 	op := draw.Src
 	for img := range screenChan {
 		draw.Draw(canvas, canvas.Bounds(), img, image.ZP, op)
-		if op == draw.Src { 	// the first draw operation is the only .Src
-			op = draw.Over		// type - the rest are .Over
+		if op == draw.Src { // the first draw operation is the only .Src
+			op = draw.Over // type - the rest are .Over
 		}
 		count++
 		if count == numberOfroutines {
@@ -203,14 +201,11 @@ func resetEnd(pos, refresh int) int {
 		refresh = 256
 	}
 	lastInd := pos + 1024*refresh
-	// fmt.Print("Rate = ", refresh, ", position = ", pos, "\n")
 	if lastInd > N {
 		lastInd = N
 	}
 	return lastInd
 }
-
-var Rainbow []color.RGBA // length = 1530
 
 // BuildImage generates a partial image of the Mandelbrot set and sends
 // this to screenChan. This is called in a goroutine indexed by part <= numberOfgoroutines
@@ -224,10 +219,10 @@ func BuildImage(part int, lastIndex int, screenChan chan image.Image) {
 		if k%numberOfroutines != part { // choose our residue class
 			continue
 		}
-		p := NextPoint(k)
+		p := Pixel[Sigma(k)] // use permutation NextPoint(k)
 		z := Point2C(p)
 		d := mandelBrot(z)
-		img.Set(p.Right, height-p.Down, Rainbow[(d*10)%1530]) //  rgba.PxColor(d))
+		img.Set(p.Right, height-p.Down, Color(10*d)) //
 	}
 
 	screenChan <- img
@@ -260,13 +255,6 @@ func SendBanner(w io.Writer) {
 	io.WriteString(w, "_"+sx+"_"+sy+"_"+sr+"_"+si+"_"+st+"_"+sm+"_"+sc)
 }
 
-// NextPoint returns the point on the screen
-// parametrized by k, using our randomization
-func NextPoint(k int) Point {
-	m := perm[k] // randomize
-	return Pixel[m]
-}
-
 // P2C converts a pixel point Q to
 // a complex number
 func Point2C(p Point) complex128 {
@@ -282,8 +270,6 @@ func Point2C(p Point) complex128 {
 
 	return complex(rx, ry)
 }
-
-
 
 func randPermutation() [N]int {
 	t := time.Now().Nanosecond()
@@ -302,7 +288,6 @@ func randPermutation() [N]int {
 	return v
 }
 
-
 func init() {
 	k := 0
 	for down := 0; down < height; down++ {
@@ -311,11 +296,24 @@ func init() {
 			k++
 		}
 	}
-	
-	perm = randPermutation()
-	position = 0
 
-	Rainbow = rgba.MakePalette()
-	
-	fmt.Println("INIT called")
+	perm := randPermutation()
+	Sigma = func(d int) int {
+		if d < 0 || d >= N {
+			panic(fmt.Sprintf("can't handle % in permutation", d))
+		}
+		return perm[d]
+	}
+
+	position = 0 // for partial image creation
+
+	Rainbow := rgba.MakePalette()
+	Color = func(d int) color.RGBA {
+		if d == tookTooLong {
+			return color.RGBA{0, 0, 0, 255}
+		}
+		return Rainbow[d%1530] // len(Rainbow) = 255*6
+	}
+
+	fmt.Println("MandelBrot server started on  http://localhost:8000")
 }
