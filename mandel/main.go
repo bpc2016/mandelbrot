@@ -57,11 +57,10 @@ func main() {
 // SendImage is the heart of this program. It renders the (partial)
 // image to send to the http server, signaling completion
 // by sending a banner
-func SendImage(w io.Writer) {
+func SendImage() []byte {
 	if position >= N { // complete we are done, send this banner to js
-		io.WriteString(w, Banner())
 		position = 0
-		return
+		return []byte(Banner())
 	}
 
 	screenChan := make(chan image.Image)
@@ -88,22 +87,23 @@ func SendImage(w io.Writer) {
 		}
 	}
 
-	// the assembly loop had blocked, and now we process result ....
-	Encode(w, canvas) // write the binary to writer w
-
 	position += 1024 * chunk // update starting point for next partial
+
+	// the assembly loop had blocked, and now we process result ....
+	return Encoded(canvas)
 }
 
-// Encode takes image encodes as PNG encodes then
-// again as Base64 then sends that to writer w
-func Encode(w io.Writer, image *image.RGBA) {
+func Encoded(image *image.RGBA) [] byte {
 	// generate PNG
-	buf := new(bytes.Buffer)
-	png.Encode(io.Writer(buf), image) // NOTE: ignoring errors, to an io.Writer
+	bufIn := new(bytes.Buffer)
+	png.Encode(io.Writer(bufIn), image) // NOTE: ignoring errors, to an io.Writer
 	// convert to Base64
-	encoder := base64.NewEncoder(base64.StdEncoding, w) // send to target w
-	encoder.Write(buf.Bytes())
+	bufOut := new(bytes.Buffer)
+	encoder := base64.NewEncoder(base64.StdEncoding, io.Writer(bufOut)) // send to target w
+	encoder.Write(bufIn.Bytes())
 	encoder.Close()
+
+	return bufOut.Bytes()
 }
 
 // BuildImage generates a partial image of the Mandelbrot set and sends
@@ -192,7 +192,8 @@ func serveContext(w http.ResponseWriter, r *http.Request) {
 // return a Mandelbrot image
 func serveImage(w http.ResponseWriter, r *http.Request) {
 	getImageReq(r) // handle the querystring
-	SendImage(w)   // fetch the base64 encoded png image
+	// SendImage(w)   // fetch the base64 encoded png image
+	w.Write( SendImage() )
 }
 
 var visited bool
