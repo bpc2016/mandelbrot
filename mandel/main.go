@@ -32,22 +32,22 @@ type Point struct {
 }
 
 var (
-	Color            func(d int) color.RGBA
-	Sigma            func(d int) int
-	Px2S             func(pr, pd int) (float64, float64) // pixel to Cartesian
-	Px2C             func(p Point) complex128
-	Pixel            [N]Point // all the screen points
-	position         = 0
-	rate             = 32          // how quickly we process - default if we dont  ?r=345 etc
-	iterations       = 3000        //
-	numberOfroutines = 2           // number of concurrent go routines
-	cx, cy           = -0.717, 0.23 // x, y coords of central point pixel (width/2,height/2)
-	hScale           = 0.02        // hScale = cx-0
-	density          = 8          // color
+	Color      func(d int) color.RGBA
+	Sigma      func(d int) int
+	Px2S       func(pr, pd int) (float64, float64) // pixel to Cartesian
+	Px2C       func(p Point) complex128
+	Pixel      [N]Point       // all the screen points
+	position   = 0            // from which to respond to next request
+	rate       = 32           // refresh rate of images
+	iterations = 3000         //
+	numPROCS   = 4            // number of concurrent go routines - given by runtime.GOMAXPROCS(0)
+	cx, cy     = -0.717, 0.23 // real/imaginary coordinates of central point pixel (width/2,height/2)
+	hScale     = 0.02         // hScale = cx-0
+	density    = 8            // color
 )
 
 func main() {
-	http.HandleFunc("/", handler_init)
+	http.HandleFunc("/", serveContext)
 	http.HandleFunc("/image/", serveImage)
 	http.Handle("/static/",
 		http.StripPrefix("/static/", http.FileServer(http.Dir("../html"))))
@@ -59,17 +59,20 @@ func main() {
 // by sending a banner
 func SendImage(w io.Writer) {
 	if position == N { // complete we are done, send this banner to js
-		io.WriteString(w,Banner())
+		io.WriteString(w, Banner())
 		position = 0
 		return
 	}
 
-	lastIndex := resetEnd(position, rate)
+	lastIndex := position + 1024*rate
+	if lastIndex > N {
+		lastIndex = N
+	}
 
 	screenChan := make(chan image.Image)
 
 	// set the partial image go routines going
-	for gor := 0; gor < numberOfroutines; gor++ {
+	for gor := 0; gor < numPROCS; gor++ {
 		go BuildImage(gor, lastIndex, screenChan)
 	}
 
@@ -85,7 +88,7 @@ func SendImage(w io.Writer) {
 			op = draw.Over // type - the rest are .Over
 		}
 		count++
-		if count == numberOfroutines {
+		if count == numPROCS {
 			close(screenChan)
 		}
 	}
@@ -108,8 +111,6 @@ func Encode(w io.Writer, image *image.RGBA) {
 	encoder.Close()
 }
 
-
-
 // BuildImage generates a partial image of the Mandelbrot set and sends
 // this to screenChan. This is called in a goroutine indexed by part <= numberOfgoroutines
 // and draws a selection of the pixels. lastIndex is the point where we stop
@@ -119,13 +120,14 @@ func BuildImage(part int, lastIndex int, screenChan chan image.Image) {
 	draw.Draw(img, img.Bounds(), image.Transparent, image.ZP, draw.Src)
 
 	for k := position; k < lastIndex; k++ {
-		if k%numberOfroutines != part { // choose our residue class
+		if k%numPROCS != part { // choose our residue class
 			continue
 		}
 		p := Pixel[Sigma(k)] // use our permutation
-		z := Px2C(p)         //Point2C(p)
+		z := Px2C(p)
 		d := mandelBrot(z)
-		img.Set(p.Right, p.Down, Color(density*d)) // no switch??
+		color := Color(density * d) // use our color density
+		img.Set(p.Right, p.Down, color)
 	}
 
 	screenChan <- img
@@ -143,20 +145,6 @@ func mandelBrot(z complex128) int {
 		}
 	}
 	return tookTooLong
-}
-
-// resetEnd returns the last index for points given
-// the 'rate' refresh (which decides refresh) and
-// current index pos along points list
-func resetEnd(pos, refresh int) int {
-	if refresh == 0 {
-		refresh = 32
-	}
-	lastInd := pos + 1024*refresh
-	if lastInd > N {
-		lastInd = N
-	}
-	return lastInd
 }
 
 func getTransforms() {
@@ -196,7 +184,7 @@ func init() {
 //======================================= ui stuff ================================================
 
 // display the base html
-func handler_init(w http.ResponseWriter, r *http.Request) {
+func serveContext(w http.ResponseWriter, r *http.Request) {
 	ReadQueryString(r) // handle the querystring
 	// set the pixel to point mapping
 	getTransforms()
@@ -295,7 +283,7 @@ func ReadQueryString(r *http.Request) {
 		case "r":
 			rate = n // global var rate
 		case "m":
-			numberOfroutines = n // global var number of goroutines
+			numPROCS = n // global var number of goroutines
 		case "x":
 			cx = z // global var center x coord
 		case "y":
@@ -316,10 +304,10 @@ func Banner() string {
 	sr := strconv.FormatFloat(hScale, 'f', -1, 64)
 	si := strconv.Itoa(iterations)
 	st := strconv.Itoa(rate)
-	sm := strconv.Itoa(numberOfroutines)
+	sm := strconv.Itoa(numPROCS)
 	sc := strconv.Itoa(density)
 	// the leading '_' below is a signal to the client that we are finished (see html.UI, js)
-	return "_"+sx+"_"+sy+"_"+sr+"_"+si+"_"+st+"_"+sm+"_"+sc
+	return "_" + sx + "_" + sy + "_" + sr + "_" + si + "_" + st + "_" + sm + "_" + sc
 }
 
 //======================= utility ================================
