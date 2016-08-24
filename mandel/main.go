@@ -54,10 +54,10 @@ func main() {
 	log.Fatal(http.ListenAndServe("localhost:8000", nil))
 }
 
-// SendImage is the heart of this program. It renders the (partial)
+// ImageToSend is the heart of this program. It renders the (partial)
 // image to send to the http server, signaling completion
 // by sending a banner
-func SendImage() []byte {
+func ImageToSend() []byte {
 	if position >= N { // complete we are done, send this banner to js
 		position = 0
 		return []byte(Banner())
@@ -90,13 +90,18 @@ func SendImage() []byte {
 	position += 1024 * chunk // update starting point for next partial
 
 	// the assembly loop had blocked, and now we process result ....
-	return Encoded(canvas)
+	byteslice := Encoded(canvas)
+
+	return byteslice 
 }
 
-func Encoded(image *image.RGBA) [] byte {
+// Encoded returns the byte slice of image after
+// conversion to PNG followed by base64 encoding
+func Encoded(image *image.RGBA) []byte {
 	// generate PNG
 	bufIn := new(bytes.Buffer)
 	png.Encode(io.Writer(bufIn), image) // NOTE: ignoring errors, to an io.Writer
+	
 	// convert to Base64
 	bufOut := new(bytes.Buffer)
 	encoder := base64.NewEncoder(base64.StdEncoding, io.Writer(bufOut)) // send to target w
@@ -189,11 +194,13 @@ func serveContext(w http.ResponseWriter, r *http.Request) {
 	w.Write([]byte(html.UI))
 }
 
+var ImageChan = make(chan []byte)
+
 // return a Mandelbrot image
 func serveImage(w http.ResponseWriter, r *http.Request) {
-	getImageReq(r) // handle the querystring
-	// SendImage(w)   // fetch the base64 encoded png image
-	w.Write( SendImage() )
+	getImageReq(r)        // handle the querystring
+	binary := ImageToSend() // bytes slice of base64 encoded png image
+	w.Write(binary)
 }
 
 var visited bool
