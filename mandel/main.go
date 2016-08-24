@@ -38,7 +38,7 @@ var (
 	Px2C       func(p Point) complex128
 	Pixel      [N]Point       // all the screen points
 	position   = 0            // from which to respond to next request
-	rate       = 32           // refresh rate of images
+	chunk      = 32           // refresh rate of images
 	iterations = 3000         //
 	numPROCS   = 4            // number of concurrent go routines - given by runtime.GOMAXPROCS(0)
 	cx, cy     = -0.717, 0.23 // real/imaginary coordinates of central point pixel (width/2,height/2)
@@ -55,40 +55,35 @@ func main() {
 }
 
 // SendImage is the heart of this program. It renders the (partial)
-// image to send to the http server, signalling completion
+// image to send to the http server, signaling completion
 // by sending a banner
 func SendImage(w io.Writer) {
-	if position == N { // complete we are done, send this banner to js
+	if position >= N { // complete we are done, send this banner to js
 		io.WriteString(w, Banner())
 		position = 0
 		return
-	}
-
-	lastIndex := position + 1024*rate
-	if lastIndex > N {
-		lastIndex = N
 	}
 
 	screenChan := make(chan image.Image)
 
 	// set the partial image go routines going
 	for gor := 0; gor < numPROCS; gor++ {
-		go BuildImage(gor, lastIndex, screenChan)
+		go BuildImage(gor, screenChan)
 	}
 
 	var canvas *image.RGBA
 
 	// assemble the image
 	canvas = image.NewRGBA(image.Rect(0, 0, width, height))
-	count := 0
+	gor := 0
 	op := draw.Src
 	for img := range screenChan {
 		draw.Draw(canvas, canvas.Bounds(), img, image.ZP, op)
 		if op == draw.Src { // the first draw operation is the only .Src
 			op = draw.Over // type - the rest are .Over
 		}
-		count++
-		if count == numPROCS {
+		gor++
+		if gor == numPROCS {
 			close(screenChan)
 		}
 	}
@@ -96,11 +91,11 @@ func SendImage(w io.Writer) {
 	// the assembly loop had blocked, and now we process result ....
 	Encode(w, canvas) // write the binary to writer w
 
-	position = lastIndex // update starting point for next partial
+	position += 1024 * chunk // update starting point for next partial
 }
 
-// Encode take image, first PNG encodes it then
-// writes its Base64 encoding to writer w
+// Encode takes image encodes as PNG encodes then
+// again as Base64 then sends that to writer w
 func Encode(w io.Writer, image *image.RGBA) {
 	// generate PNG
 	buf := new(bytes.Buffer)
@@ -112,14 +107,17 @@ func Encode(w io.Writer, image *image.RGBA) {
 }
 
 // BuildImage generates a partial image of the Mandelbrot set and sends
-// this to screenChan. This is called in a goroutine indexed by part <= numberOfgoroutines
-// and draws a selection of the pixels. lastIndex is the point where we stop
-// thereby animating the progression
-func BuildImage(part int, lastIndex int, screenChan chan image.Image) {
+// this to screenChan. This is called in a goroutine indexed by part <= numPROCS
+// and draws a selection of the pixels - as given by var position
+func BuildImage(part int, screenChan chan image.Image) {
 	img := image.NewRGBA(image.Rect(0, 0, width, height))
 	draw.Draw(img, img.Bounds(), image.Transparent, image.ZP, draw.Src)
 
-	for k := position; k < lastIndex; k++ {
+	endposition := position + 1024*chunk
+	if endposition > N {
+		endposition = N
+	}
+	for k := position; k < endposition; k++ {
 		if k%numPROCS != part { // choose our residue class
 			continue
 		}
@@ -281,7 +279,7 @@ func ReadQueryString(r *http.Request) {
 		case "num":
 			iterations = n // global var number of  iterations
 		case "r":
-			rate = n // global var rate
+			chunk = n // global var chunk
 		case "m":
 			numPROCS = n // global var number of goroutines
 		case "x":
@@ -303,7 +301,7 @@ func Banner() string {
 	sy := strconv.FormatFloat(cy, 'f', -1, 64)
 	sr := strconv.FormatFloat(hScale, 'f', -1, 64)
 	si := strconv.Itoa(iterations)
-	st := strconv.Itoa(rate)
+	st := strconv.Itoa(chunk)
 	sm := strconv.Itoa(numPROCS)
 	sc := strconv.Itoa(density)
 	// the leading '_' below is a signal to the client that we are finished (see html.UI, js)
