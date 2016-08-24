@@ -17,26 +17,132 @@ import (
 	"math/cmplx"
 	"net/http"
 	"strconv"
+	"strings"
 )
 
 func main() {
 	http.HandleFunc("/", handler_init)
-	http.HandleFunc("/image/", handler_image)
+	http.HandleFunc("/image/", serveImage)
 	http.Handle("/static/",
-		http.StripPrefix("/static/", http.FileServer(http.Dir("."))))
+		http.StripPrefix("/static/", http.FileServer(http.Dir("../html"))))
 	log.Fatal(http.ListenAndServe("localhost:8000", nil))
 }
 
 // display the base html
 func handler_init(w http.ResponseWriter, r *http.Request) {
 	ReadQueryString(r) // handle the querystring
+	// set the pixel to point mapping
+	Px2S = math.Transformation(cx, cy, hScale, width, height)
+	Px2C = func(p Point) complex128 {
+		re, im := Px2S(p.Right, p.Down)
+		return complex(re, im)
+	}
 	w.Write([]byte(html.UI))
 }
 
 // return a Mandelbrot image
-func handler_image(w http.ResponseWriter, r *http.Request) {
-	ReadQueryString(r) // handle the querystring
+func serveImage(w http.ResponseWriter, r *http.Request) {
+	getImageReq(r)
+	//ReadQueryString(r) // handle the querystring
 	SendImage(w)       // fetch the base64 encoded png image
+}
+
+func SendImage(w io.Writer) {
+	if position == N { // complete we are done, send this banner to js
+		SendBanner(w)
+		position = 0
+		return
+	}
+
+	iterations = num * 600 // we scale the given iterations
+
+	lastIndex := resetEnd(position, rate)
+
+	screenChan := make(chan image.Image)
+
+	// set the partial image go routines going
+	for gor := 0; gor < numberOfroutines; gor++ {
+		go BuildImage(gor, lastIndex, screenChan)
+	}
+
+	var canvas *image.RGBA
+
+	// assemble the image
+	canvas = image.NewRGBA(image.Rect(0, 0, width, height))
+	count := 0
+	op := draw.Src
+	for img := range screenChan {
+		draw.Draw(canvas, canvas.Bounds(), img, image.ZP, op)
+		if op == draw.Src { // the first draw operation is the only .Src
+			op = draw.Over // type - the rest are .Over
+		}
+		count++
+		if count == numberOfroutines {
+			close(screenChan)
+		}
+	}
+
+	// the assembly loop had blocked, and now we process result ....
+	Encode(w, canvas) // write the binary to writer w
+
+	position = lastIndex // update starting point for next partial
+}
+
+
+var visited bool
+
+func getImageReq(r *http.Request) {
+	var err error
+	if err = r.ParseForm(); err != nil {
+		log.Print(err)
+	}
+
+	//set up our vars num=iterations
+	for k, v := range r.Form {
+		if options[k] != 3 {
+			continue
+		}
+		if position == 0 {
+			visited = false
+		}
+
+		if !visited {
+			var x1, y1 int
+			
+			if k == "newpt" { // move center
+				w := strings.Split(v[0], "|")
+				x1, err = strconv.Atoi(w[0])
+				if err != nil {
+					log.Print(err)
+					continue
+				}
+				y1, err = strconv.Atoi(w[1])
+				if err != nil {
+					log.Print(err)
+					continue
+				}
+				// recenter
+				cx,cy = Px2S(x1,y1)
+			}
+
+			if k == "in" { // move center
+		 		hScale = hScale * 3 / 4
+			}
+
+			if k == "out" { // move center
+		 		hScale = hScale * 2 
+			}
+
+			// ini all these cases, reset
+			Px2S = math.Transformation(cx, cy, hScale, width, height)
+			Px2C = func(p Point) complex128 {
+				re, im := Px2S(p.Right, p.Down)
+				return complex(re, im)
+			}
+			visited = true
+		}
+	}
+
 }
 
 const (
@@ -53,6 +159,8 @@ type Point struct {
 var (
 	Color            func(d int) color.RGBA
 	Sigma            func(d int) int
+	Px2S             func(pr, pd int) (float64, float64) // pixel to Cartesian
+	Px2C             func(p Point) complex128
 	Pixel            [N]Point // all the screen points
 	position         = 0
 	rate             = 64          // how quickly we process - default if we dont  ?r=345 etc
@@ -66,8 +174,8 @@ var (
 		"m": 1, "r": 1, "num": 1, // 1 = int, 2 = float
 		"x": 2, "y": 2, "w": 2,
 		"dpx": 1, "dpy": 1,
-		"in": 1, "out": 1,
-		"col": 2,
+		"in": 3, "out": 3,
+		"col": 2, "newpt": 3,
 	}
 )
 
@@ -79,6 +187,9 @@ func ReadQueryString(r *http.Request) {
 	//set up our vars num=iterations
 	for k, v := range r.Form {
 		if options[k] == 0 {
+			continue
+		}
+		if options[k] == 3 {
 			continue
 		}
 		var (
@@ -112,73 +223,12 @@ func ReadQueryString(r *http.Request) {
 			cy = z // global var center y coord
 		case "w":
 			hScale = z // global var half a side
-		case "dpx":
-			if position == 0 {
-				cx = cx + hScale*float64(2*n-width)/float64(width)
-				fmt.Println("new cx = ", cx)
-			}
-		case "dpy":
-			if position == 0 {
-				vScale := hScale * (float64(height) / float64(width))
-				cy = cy + vScale*float64(height-2*n)/float64(height)
-				fmt.Println("new cy = ", cy)
-			}
-		case "in":
-			if position == 0 {
-				hScale = hScale * 3 / 4
-				fmt.Println("new hScale = ", hScale)
-			}
-		case "out":
-			if position == 0 {
-				hScale = 2 * hScale
-				fmt.Println("new hScale = ", hScale)
-			}
 		case "col":
 			col = z // change the hue
 		}
 	}
 }
 
-func SendImage(w io.Writer) {
-	if position == N { // complete we are done, send this banner to js
-		SendBanner(w)
-		position = 0
-		return
-	}
-
-	iterations = num * 600    // we scale the given iterations
-	rgba.SetPalette(num, col) // set range and hue palette
-	lastIndex := resetEnd(position, rate)
-
-	screenChan := make(chan image.Image)
-
-	// set the partial image go routines going
-	for gor := 0; gor < numberOfroutines; gor++ {
-		go BuildImage(gor, lastIndex, screenChan)
-	}
-
-	var canvas *image.RGBA
-
-	// assemble the image
-	canvas = image.NewRGBA(image.Rect(0, 0, width, height))
-	count := 0
-	op := draw.Src
-	for img := range screenChan {
-		draw.Draw(canvas, canvas.Bounds(), img, image.ZP, op)
-		if op == draw.Src { // the first draw operation is the only .Src
-			op = draw.Over // type - the rest are .Over
-		}
-		count++
-		if count == numberOfroutines {
-			close(screenChan)
-		}
-	}
-
-	// the assembly loop had blocked, and now we process result ....
-	Encode(w, canvas) // write the binary to writer w
-
-	position = lastIndex // update starting point for next partial
-}
 
 // Encode take image, first PNG encodes it then
 // writes its Base64 encoding to writer w
@@ -218,10 +268,10 @@ func BuildImage(part int, lastIndex int, screenChan chan image.Image) {
 		if k%numberOfroutines != part { // choose our residue class
 			continue
 		}
-		p := Pixel[Sigma(k)] // use permutation NextPoint(k)
-		z := Point2C(p)
+		p := Pixel[Sigma(k)] // use our permutation
+		z := Px2C(p)         //Point2C(p)
 		d := mandelBrot(z)
-		img.Set(p.Right, height-p.Down, Color(10*d)) //
+		img.Set(p.Right, p.Down, Color(18*d)) // no switch??
 	}
 
 	screenChan <- img
@@ -251,24 +301,10 @@ func SendBanner(w io.Writer) {
 	st := strconv.Itoa(rate)
 	sm := strconv.Itoa(numberOfroutines)
 	sc := strconv.FormatFloat(col, 'f', -1, 64)
+	// the leading '_' below is a signal to the client that we are finished (see html.UI, js)
 	io.WriteString(w, "_"+sx+"_"+sy+"_"+sr+"_"+si+"_"+st+"_"+sm+"_"+sc)
 }
 
-// P2C converts a pixel point Q to
-// a complex number
-func Point2C(p Point) complex128 {
-	pr := float64(p.Right)
-	pd := float64(p.Down)
-
-	wid := float64(width)
-	rx := cx + (pr-wid/2)*(hScale/wid)
-
-	het := float64(height)
-	vScale := hScale * (het / wid)
-	ry := cy + (pd-het/2)*(vScale/het)
-
-	return complex(rx, ry)
-}
 
 func init() {
 	k := 0
@@ -296,6 +332,5 @@ func init() {
 		}
 		return Rainbow[d%1530] // len(Rainbow) = 255*6
 	}
-
 	fmt.Println("MandelBrot server started on  http://localhost:8000")
 }

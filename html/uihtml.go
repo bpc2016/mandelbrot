@@ -20,7 +20,7 @@ $(document).ready(function(){
   // fetch the image with an ajax call ..
   function fetchPiece() {
     var qs = 'http://localhost:8000/image/';
-    if (px > 0 || py > 0  ) qs = qs + '?dpx='+px+'&dpy='+py;
+    if (px > 0 || py > 0  ) qs = qs + '?dpx='+px+'&dpy='+py+'&newpt='+px+'|'+py;
     if (zoomin ) qs = 'http://localhost:8000/image/?in=1';
     if (zoomout ) qs = 'http://localhost:8000/image/?out=1';
       $.get(qs)
