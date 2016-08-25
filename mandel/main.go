@@ -51,26 +51,27 @@ func main() {
 	getTransforms()
 	go startServer()
 
-	fmt.Println("calling ImageToSend ...")
-	// for{
-
-	go ImageToSend(0)
 	for {
-		select {
-		case <-quit:
-			fmt.Println("quit ")
-			return
-		case i := <-nextstart:
-			fmt.Println("nextstart ", i)
-			if i >= N { // complete we are done, send this banner to js			
-				fmt.Println("called imagesend done ")
-				ImageChan <- []byte(Banner())
-			} else {
-				go ImageToSend(i)
+		go ImageToSend(0)
+		for {
+			select {
+			case <-RequestChan: // wait for a request
+				fmt.Println("dumped request")
+				go ImageToSend(0)
+			case <-quit:
+				fmt.Println("quit ")
+				return
+			case i := <-nextstart:
+				fmt.Println("nextstart ", i)
+				if i >= N { // complete we are done, send this banner to js
+					fmt.Println("post end ")
+					ImageChan <- []byte(Banner())
+				} else {
+					go ImageToSend(i)
+				}
+				//default: // keep going
 			}
-		//default: // keep going
 		}
-		// fmt.Println("again ...")
 	}
 }
 
@@ -89,8 +90,8 @@ func startServer() {
 // ImageToSend is the heart of this program. It renders the (partial)
 // image to send to the http server, signaling completion
 // by sending a banner
-func ImageToSend(position int) { 
-	fmt.Println("called imagesend ... ")
+func ImageToSend(position int) {
+	fmt.Println("ImSend ", position)
 
 	screenChan := make(chan image.Image)
 
@@ -123,7 +124,7 @@ func ImageToSend(position int) {
 
 	//return byteslice
 	ImageChan <- byteslice
-	nextstart <- position + 1024 * chunk 
+	nextstart <- position + 1024*chunk
 }
 
 // Encoded returns the byte slice of image after
@@ -154,7 +155,7 @@ func BuildImage(part int, position int, screenChan chan image.Image) {
 		endposition = N
 	}
 
-	fmt.Println("called BuildImage : ", part, "from ", position, "to", endposition)
+	fmt.Println("BuildImage : ", part, "from ", position, "to", endposition)
 
 	for k := position; k < endposition; k++ {
 		if k%numPROCS != part { // choose our residue class
@@ -187,7 +188,7 @@ func mandelBrot(z complex128) int {
 
 func getTransforms() {
 
-	fmt.Println("getTransforms ...")
+	fmt.Println("GetT")
 
 	Px2S = math.Transformation(cx, cy, hScale, width, height)
 	Px2C = func(p Point) complex128 {
@@ -233,20 +234,79 @@ func serveContext(w http.ResponseWriter, r *http.Request) {
 	w.Write([]byte(html.UI))
 }
 
-var ImageChan = make(chan []byte, 40)
+var ImageChan = make(chan []byte, 33) // buffered
+var RequestChan = make(chan Request)
+
+type Direction int
+
+const (
+	none Direction = iota
+	in
+	out
+)
+
+type Request struct {
+	Point
+	focus Direction
+}
+
+var Z = Request{} // empty request
 
 // return a Mandelbrot image
 func serveImage(w http.ResponseWriter, r *http.Request) {
-	getImageReq(r) // handle the querystring
-
-	fmt.Println("inside ...")
-
-	select {
-	case binary := <-ImageChan: //ImageToSend() // bytes slice of base64 encoded png image
-		w.Write(binary)
-	default: // nothing either
+	R := getImageReq(r) // handle the querystring
+	if R != Z {
+		fmt.Printf("Sending request: \n%+v\n", R)
+		RequestChan <- R
+		fmt.Println("Past receiving request ")
 	}
 
+	fmt.Println("Check image channel ")
+
+	select {
+	case binary := <-ImageChan:
+		w.Write(binary)
+	default: // do nothing: makes this non-blocking
+	}
+
+}
+
+func getImageReq(r *http.Request) Request {
+	checkF(r.ParseForm())
+	R := Request{}
+
+	var err error
+	var newr, newd int
+
+	for k, v := range r.Form {
+		if !(k == "newpt" || k == "in" || k == "out") {
+			continue
+		}
+		if k == "newpt" { // center data: pr|pd
+			w := strings.Split(v[0], "|")
+			newr, err = strconv.Atoi(w[0])
+			checkF(err)
+			newd, err = strconv.Atoi(w[1])
+			checkF(err)
+
+			R.Right = newr
+			R.Down = newd
+			// recenter
+			//cx, cy = Px2S(newr, newd)
+		}
+
+		if k == "in" { // scale in
+			//hScale = hScale * 3 / 4
+			R.focus = in
+		}
+
+		if k == "out" { // scale out
+			// hScale = hScale * 2
+			R.focus = out
+		}
+	}
+
+	return R
 }
 
 var visited bool
@@ -254,8 +314,13 @@ var visited bool
 // getImageReq handles http requests from
 // user input: click and keyboard
 // uses 'visited' above so as not to repeat itself
-func getImageReq(r *http.Request) {
+func getImageReq0(r *http.Request) {
+
+	fmt.Println("called getImageReq")
+
 	checkF(r.ParseForm())
+
+	fmt.Printf("No parse error, \n%+v\n", r.Form)
 
 	var err error
 	for k, v := range r.Form {
@@ -263,7 +328,7 @@ func getImageReq(r *http.Request) {
 			continue
 		}
 
-	fmt.Println("getImageReq ...position: ", position)
+		fmt.Println("getImageReq ...position: ", position)
 
 		visited = position != 0
 
