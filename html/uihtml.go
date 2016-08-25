@@ -43,6 +43,7 @@ $(document).ready(function(){
         '"></img>'].join('');
         $(h).appendTo("#imgs");
         ind+=2;
+        console.log('ind=',ind)
       fetchPiece()
       } else {
         console.log('no more pieces')

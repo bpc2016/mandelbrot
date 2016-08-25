@@ -47,27 +47,56 @@ var (
 )
 
 func main() {
+	Init()
+	getTransforms()
+	go startServer()
+
+	fmt.Println("calling ImageToSend ...")
+	// for{
+
+	go ImageToSend(0)
+	for {
+		select {
+		case <-quit:
+			fmt.Println("quit ")
+			return
+		case i := <-nextstart:
+			fmt.Println("nextstart ", i)
+			if i >= N { // complete we are done, send this banner to js			
+				fmt.Println("called imagesend done ")
+				ImageChan <- []byte(Banner())
+			} else {
+				go ImageToSend(i)
+			}
+		//default: // keep going
+		}
+		// fmt.Println("again ...")
+	}
+}
+
+var quit = make(chan int)
+var nextstart = make(chan int)
+
+func startServer() {
 	http.HandleFunc("/", serveContext)
 	http.HandleFunc("/image/", serveImage)
 	http.Handle("/static/",
 		http.StripPrefix("/static/", http.FileServer(http.Dir("../html"))))
 	log.Fatal(http.ListenAndServe("localhost:8000", nil))
+
 }
 
 // ImageToSend is the heart of this program. It renders the (partial)
 // image to send to the http server, signaling completion
 // by sending a banner
-func ImageToSend() []byte {
-	if position >= N { // complete we are done, send this banner to js
-		position = 0
-		return []byte(Banner())
-	}
+func ImageToSend(position int) { 
+	fmt.Println("called imagesend ... ")
 
 	screenChan := make(chan image.Image)
 
 	// set the partial image go routines going
 	for gor := 0; gor < numPROCS; gor++ {
-		go BuildImage(gor, screenChan)
+		go BuildImage(gor, position, screenChan)
 	}
 
 	var canvas *image.RGBA
@@ -87,12 +116,14 @@ func ImageToSend() []byte {
 		}
 	}
 
-	position += 1024 * chunk // update starting point for next partial
-
 	// the assembly loop had blocked, and now we process result ....
 	byteslice := Encoded(canvas)
 
-	return byteslice 
+	fmt.Println("done byteslice pos:", position)
+
+	//return byteslice
+	ImageChan <- byteslice
+	nextstart <- position + 1024 * chunk 
 }
 
 // Encoded returns the byte slice of image after
@@ -101,7 +132,7 @@ func Encoded(image *image.RGBA) []byte {
 	// generate PNG
 	bufIn := new(bytes.Buffer)
 	png.Encode(io.Writer(bufIn), image) // NOTE: ignoring errors, to an io.Writer
-	
+
 	// convert to Base64
 	bufOut := new(bytes.Buffer)
 	encoder := base64.NewEncoder(base64.StdEncoding, io.Writer(bufOut)) // send to target w
@@ -114,7 +145,7 @@ func Encoded(image *image.RGBA) []byte {
 // BuildImage generates a partial image of the Mandelbrot set and sends
 // this to screenChan. This is called in a goroutine indexed by part <= numPROCS
 // and draws a selection of the pixels - as given by var position
-func BuildImage(part int, screenChan chan image.Image) {
+func BuildImage(part int, position int, screenChan chan image.Image) {
 	img := image.NewRGBA(image.Rect(0, 0, width, height))
 	draw.Draw(img, img.Bounds(), image.Transparent, image.ZP, draw.Src)
 
@@ -122,10 +153,14 @@ func BuildImage(part int, screenChan chan image.Image) {
 	if endposition > N {
 		endposition = N
 	}
+
+	fmt.Println("called BuildImage : ", part, "from ", position, "to", endposition)
+
 	for k := position; k < endposition; k++ {
 		if k%numPROCS != part { // choose our residue class
 			continue
 		}
+
 		p := Pixel[Sigma(k)] // use our permutation
 		z := Px2C(p)
 		d := mandelBrot(z)
@@ -151,6 +186,9 @@ func mandelBrot(z complex128) int {
 }
 
 func getTransforms() {
+
+	fmt.Println("getTransforms ...")
+
 	Px2S = math.Transformation(cx, cy, hScale, width, height)
 	Px2C = func(p Point) complex128 {
 		re, im := Px2S(p.Right, p.Down)
@@ -160,7 +198,7 @@ func getTransforms() {
 
 //========================================== initialize ======================================================
 
-func init() {
+func Init() {
 	k := 0
 	for down := 0; down < height; down++ {
 		for right := 0; right < width; right++ {
@@ -191,16 +229,24 @@ func serveContext(w http.ResponseWriter, r *http.Request) {
 	ReadQueryString(r) // handle the querystring
 	// set the pixel to point mapping
 	getTransforms()
+
 	w.Write([]byte(html.UI))
 }
 
-var ImageChan = make(chan []byte)
+var ImageChan = make(chan []byte, 40)
 
 // return a Mandelbrot image
 func serveImage(w http.ResponseWriter, r *http.Request) {
-	getImageReq(r)        // handle the querystring
-	binary := ImageToSend() // bytes slice of base64 encoded png image
-	w.Write(binary)
+	getImageReq(r) // handle the querystring
+
+	fmt.Println("inside ...")
+
+	select {
+	case binary := <-ImageChan: //ImageToSend() // bytes slice of base64 encoded png image
+		w.Write(binary)
+	default: // nothing either
+	}
+
 }
 
 var visited bool
@@ -216,6 +262,8 @@ func getImageReq(r *http.Request) {
 		if !(k == "newpt" || k == "in" || k == "out") {
 			continue
 		}
+
+	fmt.Println("getImageReq ...position: ", position)
 
 		visited = position != 0
 
