@@ -11,13 +11,10 @@ import (
 	"image/png"
 	"io"
 	"log"
-	"mandelbrot/html"
 	"mandelbrot/math"
 	"mandelbrot/rgba"
+	"mandelbrot/ui"
 	"math/cmplx"
-	"net/http"
-	"strconv"
-	"strings"
 )
 
 const (
@@ -47,52 +44,29 @@ var (
 )
 
 func main() {
-	Init()
 	getTransforms()
-	go startServer()
+	
+	go ui.StartServer()
 
 	for {
-		go ImageToSend(0)
-		for {
-			select {
-			case <-RequestChan: // wait for a request
-				fmt.Println("dumped request")
-				go ImageToSend(0)
-			case <-quit:
-				fmt.Println("quit ")
-				return
-			case i := <-nextstart:
-				fmt.Println("nextstart ", i)
-				if i >= N { // complete we are done, send this banner to js
-					fmt.Println("post end ")
-					ImageChan <- []byte(Banner())
-				} else {
-					go ImageToSend(i)
-				}
-				//default: // keep going
-			}
+		fmt.Println("started producing images")
+		for pos := 0; pos < N; pos += 1024 * chunk {
+			ImageToSend(pos)
+			fmt.Println("image", pos)
 		}
+		ui.ImageChan <- []byte(ui.Banner()) //  done sending the image fmt.Println("sent banner ")
+
+		<-ui.RequestChan // wait for a request
+			fmt.Println("dumped request")
 	}
 }
 
-var quit = make(chan int)
-var nextstart = make(chan int)
-
-func startServer() {
-	http.HandleFunc("/", serveContext)
-	http.HandleFunc("/image/", serveImage)
-	http.Handle("/static/",
-		http.StripPrefix("/static/", http.FileServer(http.Dir("../html"))))
-	log.Fatal(http.ListenAndServe("localhost:8000", nil))
-
-}
 
 // ImageToSend is the heart of this program. It renders the (partial)
 // image to send to the http server, signaling completion
 // by sending a banner
 func ImageToSend(position int) {
-	fmt.Println("ImSend ", position)
-
+	
 	screenChan := make(chan image.Image)
 
 	// set the partial image go routines going
@@ -100,14 +74,14 @@ func ImageToSend(position int) {
 		go BuildImage(gor, position, screenChan)
 	}
 
-	var canvas *image.RGBA
+	var partialimage *image.RGBA
 
 	// assemble the image
-	canvas = image.NewRGBA(image.Rect(0, 0, width, height))
+	partialimage = image.NewRGBA(image.Rect(0, 0, width, height))
 	gor := 0
 	op := draw.Src
 	for img := range screenChan {
-		draw.Draw(canvas, canvas.Bounds(), img, image.ZP, op)
+		draw.Draw(partialimage, partialimage.Bounds(), img, image.ZP, op)
 		if op == draw.Src { // the first draw operation is the only .Src
 			op = draw.Over // type - the rest are .Over
 		}
@@ -118,13 +92,11 @@ func ImageToSend(position int) {
 	}
 
 	// the assembly loop had blocked, and now we process result ....
-	byteslice := Encoded(canvas)
+	byteslice := Encoded(partialimage)
 
-	fmt.Println("done byteslice pos:", position)
+	//fmt.Println("done byteslice pos:", position)
 
-	//return byteslice
-	ImageChan <- byteslice
-	nextstart <- position + 1024*chunk
+	ui.ImageChan <- byteslice
 }
 
 // Encoded returns the byte slice of image after
@@ -154,8 +126,6 @@ func BuildImage(part int, position int, screenChan chan image.Image) {
 	if endposition > N {
 		endposition = N
 	}
-
-	fmt.Println("BuildImage : ", part, "from ", position, "to", endposition)
 
 	for k := position; k < endposition; k++ {
 		if k%numPROCS != part { // choose our residue class
@@ -199,7 +169,7 @@ func getTransforms() {
 
 //========================================== initialize ======================================================
 
-func Init() {
+func init() {
 	k := 0
 	for down := 0; down < height; down++ {
 		for right := 0; right < width; right++ {
@@ -225,209 +195,209 @@ func Init() {
 
 //======================================= ui stuff ================================================
 
-// display the base html
-func serveContext(w http.ResponseWriter, r *http.Request) {
-	ReadQueryString(r) // handle the querystring
-	// set the pixel to point mapping
-	getTransforms()
+// // display the base html
+// func serveContext(w http.ResponseWriter, r *http.Request) {
+// 	ReadQueryString(r) // handle the querystring
+// 	// set the pixel to point mapping
+// 	getTransforms()
 
-	w.Write([]byte(html.UI))
-}
+// 	w.Write([]byte(html.UI))
+// }
 
-var ImageChan = make(chan []byte, 33) // buffered
-var RequestChan = make(chan Request)
+// var ImageChan = make(chan []byte, 33) // buffered
+// var RequestChan = make(chan Request)
 
-type Direction int
+// type Direction int
 
-const (
-	none Direction = iota
-	in
-	out
-)
+// const (
+// 	none Direction = iota
+// 	in
+// 	out
+// )
 
-type Request struct {
-	Point
-	focus Direction
-}
+// type Request struct {
+// 	Point
+// 	focus Direction
+// }
 
-var Z = Request{} // empty request
+// var Z = Request{} // empty request
 
-// return a Mandelbrot image
-func serveImage(w http.ResponseWriter, r *http.Request) {
-	R := getImageReq(r) // handle the querystring
-	if R != Z {
-		fmt.Printf("Sending request: \n%+v\n", R)
-		RequestChan <- R
-		fmt.Println("Past receiving request ")
-	}
+// // return a Mandelbrot image
+// func serveImage(w http.ResponseWriter, r *http.Request) {
+// 	R := getImageReq(r) // handle the querystring
+// 	if R != Z {
+// 		fmt.Printf("Sending request: \n%+v\n", R)
+// 		RequestChan <- R
+// 		fmt.Println("Past receiving request ")
+// 	}
 
-	fmt.Println("Check image channel ")
+// 	fmt.Printf("\nCheck image channel: %+v\n",r)
 
-	select {
-	case binary := <-ImageChan:
-		w.Write(binary)
-	default: // do nothing: makes this non-blocking
-	}
+// 	select {
+// 	case binary := <-ImageChan:
+// 		w.Write(binary)
+// 	default: // do nothing: makes this non-blocking
+// 	}
 
-}
+// }
 
-func getImageReq(r *http.Request) Request {
-	checkF(r.ParseForm())
-	R := Request{}
+// func getImageReq(r *http.Request) Request {
+// 	checkF(r.ParseForm())
+// 	R := Request{}
 
-	var err error
-	var newr, newd int
+// 	var err error
+// 	var newr, newd int
 
-	for k, v := range r.Form {
-		if !(k == "newpt" || k == "in" || k == "out") {
-			continue
-		}
-		if k == "newpt" { // center data: pr|pd
-			w := strings.Split(v[0], "|")
-			newr, err = strconv.Atoi(w[0])
-			checkF(err)
-			newd, err = strconv.Atoi(w[1])
-			checkF(err)
+// 	for k, v := range r.Form {
+// 		if !(k == "newpt" || k == "in" || k == "out") {
+// 			continue
+// 		}
+// 		if k == "newpt" { // center data: pr|pd
+// 			w := strings.Split(v[0], "|")
+// 			newr, err = strconv.Atoi(w[0])
+// 			checkF(err)
+// 			newd, err = strconv.Atoi(w[1])
+// 			checkF(err)
 
-			R.Right = newr
-			R.Down = newd
-			// recenter
-			//cx, cy = Px2S(newr, newd)
-		}
+// 			R.Right = newr
+// 			R.Down = newd
+// 			// recenter
+// 			//cx, cy = Px2S(newr, newd)
+// 		}
 
-		if k == "in" { // scale in
-			//hScale = hScale * 3 / 4
-			R.focus = in
-		}
+// 		if k == "in" { // scale in
+// 			//hScale = hScale * 3 / 4
+// 			R.focus = in
+// 		}
 
-		if k == "out" { // scale out
-			// hScale = hScale * 2
-			R.focus = out
-		}
-	}
+// 		if k == "out" { // scale out
+// 			// hScale = hScale * 2
+// 			R.focus = out
+// 		}
+// 	}
 
-	return R
-}
+// 	return R
+// }
 
-var visited bool
+// var visited bool
 
-// getImageReq handles http requests from
-// user input: click and keyboard
-// uses 'visited' above so as not to repeat itself
-func getImageReq0(r *http.Request) {
+// // getImageReq handles http requests from
+// // user input: click and keyboard
+// // uses 'visited' above so as not to repeat itself
+// func getImageReq0(r *http.Request) {
 
-	fmt.Println("called getImageReq")
+// 	fmt.Println("called getImageReq")
 
-	checkF(r.ParseForm())
+// 	checkF(r.ParseForm())
 
-	fmt.Printf("No parse error, \n%+v\n", r.Form)
+// 	fmt.Printf("No parse error, \n%+v\n", r.Form)
 
-	var err error
-	for k, v := range r.Form {
-		if !(k == "newpt" || k == "in" || k == "out") {
-			continue
-		}
+// 	var err error
+// 	for k, v := range r.Form {
+// 		if !(k == "newpt" || k == "in" || k == "out") {
+// 			continue
+// 		}
 
-		fmt.Println("getImageReq ...position: ", position)
+// 		fmt.Println("getImageReq ...position: ", position)
 
-		visited = position != 0
+// 		visited = position != 0
 
-		if !visited {
-			var newr, newd int
+// 		if !visited {
+// 			var newr, newd int
 
-			if k == "newpt" { // center data: pr|pd
-				w := strings.Split(v[0], "|")
-				newr, err = strconv.Atoi(w[0])
-				if err != nil { // just use previous value
-					log.Printf("format error for %v : %v", k, err)
-					continue
-				}
-				newd, err = strconv.Atoi(w[1])
-				if err != nil { // just use previous value
-					log.Printf("format error for %v : %v", k, err)
-					continue
-				}
-				// recenter
-				cx, cy = Px2S(newr, newd)
-			}
+// 			if k == "newpt" { // center data: pr|pd
+// 				w := strings.Split(v[0], "|")
+// 				newr, err = strconv.Atoi(w[0])
+// 				if err != nil { // just use previous value
+// 					log.Printf("format error for %v : %v", k, err)
+// 					continue
+// 				}
+// 				newd, err = strconv.Atoi(w[1])
+// 				if err != nil { // just use previous value
+// 					log.Printf("format error for %v : %v", k, err)
+// 					continue
+// 				}
+// 				// recenter
+// 				cx, cy = Px2S(newr, newd)
+// 			}
 
-			if k == "in" { // scale in
-				hScale = hScale * 3 / 4
-			}
+// 			if k == "in" { // scale in
+// 				hScale = hScale * 3 / 4
+// 			}
 
-			if k == "out" { // scale out
-				hScale = hScale * 2
-			}
-			// in all these cases, reset
-			getTransforms()
-			visited = true
-		}
-	}
+// 			if k == "out" { // scale out
+// 				hScale = hScale * 2
+// 			}
+// 			// in all these cases, reset
+// 			getTransforms()
+// 			visited = true
+// 		}
+// 	}
 
-}
+// }
 
-var numberType = map[string]int{
-	"m": 1, "r": 1, "num": 1, // 1 = int, 2 = float
-	"x": 2, "y": 2, "w": 2,
-	"dpx": 1, "dpy": 1,
-	"col": 1,
-}
+// var numberType = map[string]int{
+// 	"m": 1, "r": 1, "num": 1, // 1 = int, 2 = float
+// 	"x": 2, "y": 2, "w": 2,
+// 	"dpx": 1, "dpy": 1,
+// 	"col": 1,
+// }
 
-func ReadQueryString(r *http.Request) {
-	// read the form
-	checkF(r.ParseForm())
+// func ReadQueryString(r *http.Request) {
+// 	// read the form
+// 	checkF(r.ParseForm())
 
-	//set up our vars
-	for k, v := range r.Form {
-		if numberType[k] == 0 {
-			continue
-		}
-		var (
-			n   int
-			z   float64
-			err error
-		)
-		if numberType[k] == 1 { // int value
-			n, err = strconv.Atoi(v[0])
-		} else {
-			z, err = strconv.ParseFloat(v[0], 64)
-		}
-		if err != nil { // just use previous value
-			log.Printf("format error for %v : %v", k, err)
-			continue
-		}
-		switch k {
-		case "num":
-			iterations = n // global var number of  iterations
-		case "r":
-			chunk = n // global var chunk
-		case "m":
-			numPROCS = n // global var number of goroutines
-		case "x":
-			cx = z // global var center x coord
-		case "y":
-			cy = z // global var center y coord
-		case "w":
-			hScale = z // global var half a side
-		case "col":
-			density = n // change the hue
-		}
-	}
-}
+// 	//set up our vars
+// 	for k, v := range r.Form {
+// 		if numberType[k] == 0 {
+// 			continue
+// 		}
+// 		var (
+// 			n   int
+// 			z   float64
+// 			err error
+// 		)
+// 		if numberType[k] == 1 { // int value
+// 			n, err = strconv.Atoi(v[0])
+// 		} else {
+// 			z, err = strconv.ParseFloat(v[0], 64)
+// 		}
+// 		if err != nil { // just use previous value
+// 			log.Printf("format error for %v : %v", k, err)
+// 			continue
+// 		}
+// 		switch k {
+// 		case "num":
+// 			iterations = n // global var number of  iterations
+// 		case "r":
+// 			chunk = n // global var chunk
+// 		case "m":
+// 			numPROCS = n // global var number of goroutines
+// 		case "x":
+// 			cx = z // global var center x coord
+// 		case "y":
+// 			cy = z // global var center y coord
+// 		case "w":
+// 			hScale = z // global var half a side
+// 		case "col":
+// 			density = n // change the hue
+// 		}
+// 	}
+// }
 
-// Banner writes the details of the last build
-// at the top of the page
-func Banner() string {
-	sx := strconv.FormatFloat(cx, 'f', -1, 64)
-	sy := strconv.FormatFloat(cy, 'f', -1, 64)
-	sr := strconv.FormatFloat(hScale, 'f', -1, 64)
-	si := strconv.Itoa(iterations)
-	st := strconv.Itoa(chunk)
-	sm := strconv.Itoa(numPROCS)
-	sc := strconv.Itoa(density)
-	// the leading '_' below is a signal to the client that we are finished (see html.UI, js)
-	return "_" + sx + "_" + sy + "_" + sr + "_" + si + "_" + st + "_" + sm + "_" + sc
-}
+// // Banner writes the details of the last build
+// // at the top of the page
+// func Banner() string {
+// 	sx := strconv.FormatFloat(cx, 'f', -1, 64)
+// 	sy := strconv.FormatFloat(cy, 'f', -1, 64)
+// 	sr := strconv.FormatFloat(hScale, 'f', -1, 64)
+// 	si := strconv.Itoa(iterations)
+// 	st := strconv.Itoa(chunk)
+// 	sm := strconv.Itoa(numPROCS)
+// 	sc := strconv.Itoa(density)
+// 	// the leading '_' below is a signal to the client that we are finished (see html.UI, js)
+// 	return "_" + sx + "_" + sy + "_" + sr + "_" + si + "_" + st + "_" + sm + "_" + sc
+// }
 
 //======================= utility ================================
 

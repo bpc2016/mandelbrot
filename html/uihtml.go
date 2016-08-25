@@ -19,38 +19,41 @@ $(document).ready(function(){
   var ind = 1;
   // fetch the image with an ajax call ..
   function fetchPiece() {
+    console.log('fetchpiece called')
     var qs = 'http://localhost:8000/image/';
     if (px > 0 || py > 0  ) qs = qs + '?dpx='+px+'&dpy='+py+'&newpt='+px+'|'+py;
     if (zoomin ) qs = 'http://localhost:8000/image/?in=1';
     if (zoomout ) qs = 'http://localhost:8000/image/?out=1';
-      $.get(qs)
+    console.log('fetchpiece called qs:', qs)
+    $.get(qs)
         .done(function(result){
-    if (result.substr(0,1)==='_'){
-      console.log('complete!');
-      v = result.split('_')
-      loadVals(v)
-      loading = false;
-      zoomin = zoomout = false;
-      px = py = 0;
-      return;
-    } 
-      if (result) {
-      var h = ['<img ',
-      'style="position:absolute; top:0; left:0; z-index:',
-       ind,
-      ';" src ="data:image/png;base64,',
-      result,
-        '"></img>'].join('');
-        $(h).appendTo("#imgs");
-        ind+=2;
-        console.log('ind=',ind)
-      fetchPiece()
-      } else {
-        console.log('no more pieces')
-      }
+            if (result.substr(0,1)==='_'){
+              console.log('complete!');
+              v = result.split('_')
+              loadVals(v)
+              loading = false;
+              zoomin = zoomout = false;
+              px = py = 0;
+              ind = 1;
+              return;
+            } 
+            if (result) {
+              var h = ['<img ',
+                'style="position:absolute; top:0; left:0; z-index:',
+                 ind,
+                ';" src ="data:image/png;base64,',
+                result,
+                  '"></img>'].join('');
+              $(h).appendTo("#imgs");
+              ind+=2;
+              console.log('ind=',ind)
+              fetchPiece()
+            } else {
+              console.log('no more pieces')
+            }
        })
        .fail(function(){
-      console.log('oops!')
+          console.log('oops!')
        });
   }
   fetchPiece()
