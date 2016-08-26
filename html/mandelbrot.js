@@ -4,13 +4,15 @@
   var px = 0, py = 0; // holds the pixel position of mouse click
   var ind = 1;
 
-function fetchPiece() {
-	console.log('fetchpiece called')
+function fetchPiece(extra) {
 	var qs = 'http://localhost:8000/image/';
+	str = ""
+	if (extra) { str = qs+"?"+extra; console.log("zoomin=",zoomin); } 
+	console.log('fetchpiece called ->',str)
 	if (px > 0 || py > 0  ) qs = qs + '?dpx='+px+'&dpy='+py+'&newpt='+px+'|'+py;
 	if (zoomin ) qs = 'http://localhost:8000/image/?in=1';
 	if (zoomout ) qs = 'http://localhost:8000/image/?out=1';
-	console.log('fetchpiece called qs:', qs)
+	console.log('.get qs = ', qs)
 	$.get(qs)
 	    .done(function(result){
 	        if (result.substr(0,1)==='_'){
@@ -91,3 +93,14 @@ $(document).ready(function(){
 	console.log((e.pageX-posX)+', '+ (e.pageY-posY))
 	});
 });
+
+function postPiece() {
+	console.log('bogus zoom')
+	loading = true
+	str = $("#data").serialize() 
+	loading = true
+	zoomin = true
+	$("#imgs").html('')
+	fetchPiece(str)
+	return false//fetchPiece()
+}

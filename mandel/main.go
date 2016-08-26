@@ -18,42 +18,35 @@ import (
 )
 
 const (
-	width, height = 1024, 512
-	N             = width * height // number of pixels
-	tookTooLong   = 0              // flag failure, color Black
+	N           = ui.Width * ui.Height // number of pixels
+	tookTooLong = 0                    // flag failure, color Black
 )
 
 var (
-	Color      func(d int) color.RGBA
-	Sigma      func(d int) int
-	Px2C       = ui.PixelToComplex
-	Pixel      [N]ui.Point       // all the screen points
-	chunk      = ui.R.Chunk      // refresh rate of images
-	iterations = ui.R.Iterations //
-	numPROCS   = ui.R.NumPROCS   // number of concurrent go routines - given by runtime.GOMAXPROCS(0)
-	density    = ui.R.Density
+	Color    func(d int) color.RGBA
+	Sigma    func(d int) int
+	Px2C     = ui.PixelToComplex
+	Pixel    [N]ui.Point     // all the screen points
+	numPROCS = ui.R.NumPROCS // number of parallel goroutines - here, I've used runtime.GOMAXPROCS(0)
 )
 
 func main() {
-
 	go ui.StartServer()
-
 	for {
 		fmt.Println("started producing images")
-		for pos := 0; pos < N; pos += 1024 * chunk {
-			ui.ImageChan <- ImageToSend(pos)
+		for pos := 0; pos < N; pos += 1024 * ui.R.Chunk {
+			ui.ImageChan <- PartialFrom(pos)
 			fmt.Println("image", pos)
 		}
-		ui.ImageChan <- []byte(ui.Banner()) //  banner indicates end of sending the image
-
-		<-ui.RequestChan // wait for a request
+		banner := []byte(ui.Banner())
+		ui.ImageChan <- banner //  banner indicates end of sending the image
+		<-ui.RequestChan       // wait for a request
 	}
 }
 
-// ImageToSend is the heart of this program. It renders the (partial)
-// image to send to the http server, signaling completion
-// by sending a banner
-func ImageToSend(position int) []byte {
+// PartialFrom returns base64 encoded image from position.
+// it is partial because the limiting position is given by ui.R.Chunk
+func PartialFrom(position int) []byte {
 
 	screenChan := make(chan image.Image)
 
@@ -65,7 +58,7 @@ func ImageToSend(position int) []byte {
 	var partialimage *image.RGBA
 
 	// assemble the image
-	partialimage = image.NewRGBA(image.Rect(0, 0, width, height))
+	partialimage = image.NewRGBA(image.Rect(0, 0, ui.Width, ui.Height))
 	gor := 0
 	op := draw.Src
 	for img := range screenChan {
@@ -78,9 +71,7 @@ func ImageToSend(position int) []byte {
 			close(screenChan)
 		}
 	}
-
 	// the assembly loop had blocked, and now we process result ....
-	// ui.ImageChan <- Encoded(partialimage)
 	return Encoded(partialimage)
 }
 
@@ -104,14 +95,13 @@ func Encoded(image *image.RGBA) []byte {
 // this to screenChan. This is called in a goroutine indexed by part <= numPROCS
 // and draws a selection of the pixels - as given by var position
 func BuildImage(part int, position int, screenChan chan image.Image) {
-	img := image.NewRGBA(image.Rect(0, 0, width, height))
+	img := image.NewRGBA(image.Rect(0, 0, ui.Width, ui.Height))
 	draw.Draw(img, img.Bounds(), image.Transparent, image.ZP, draw.Src)
 
-	endposition := position + 1024*chunk
+	endposition := position + 1024*ui.R.Chunk
 	if endposition > N {
 		endposition = N
 	}
-
 	for k := position; k < endposition; k++ {
 		if k%numPROCS != part { // choose our residue class
 			continue
@@ -119,10 +109,9 @@ func BuildImage(part int, position int, screenChan chan image.Image) {
 		p := Pixel[Sigma(k)] // use our permutation
 		z := Px2C(p)
 		d := mandelBrot(z)
-		color := Color(density * d) // use our color density
+		color := Color(ui.R.Density * d) // use our color density
 		img.Set(p.Right, p.Down, color)
 	}
-
 	screenChan <- img
 }
 
@@ -131,7 +120,7 @@ func BuildImage(part int, position int, screenChan chan image.Image) {
 // tookTooLong (=0)
 func mandelBrot(z complex128) int {
 	var v complex128
-	for n := 0; n < iterations; n++ {
+	for n := 0; n < ui.R.Iterations; n++ {
 		v = v*v + z
 		if cmplx.Abs(v) > 2 {
 			return n
@@ -144,8 +133,8 @@ func mandelBrot(z complex128) int {
 
 func init() {
 	k := 0
-	for down := 0; down < height; down++ {
-		for right := 0; right < width; right++ {
+	for down := 0; down < ui.Height; down++ {
+		for right := 0; right < ui.Width; right++ {
 			Pixel[k] = ui.Point{right, down}
 			k++
 		}

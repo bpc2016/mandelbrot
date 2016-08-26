@@ -8,7 +8,7 @@ Cache-Control:No-Cache;>
     <script type="text/javascript" src="mandelbrot.js"></script>
   </head>
   <body>
-    <form onsubmit="fetchPiece()">
+    <form id=data onsubmit="return postPiece();">
       x: <input type="text" size=8 name="x">
       y: <input type="text" size=8 name="y">
       wd: <input type="text" size=5 name="w">
