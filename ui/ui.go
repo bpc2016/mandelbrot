@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"mandelbrot/html"
+	"mandelbrot/math"
 	"net/http"
 	"strconv"
 	"strings"
@@ -13,7 +14,6 @@ import (
 const (
 	width, height = 1024, 512
 	N             = width * height // number of pixels
-	tookTooLong   = 0              // flag failure, color Black
 )
 
 type Point struct {
@@ -21,227 +21,149 @@ type Point struct {
 	Down  int // down from ""
 }
 
+
+// View is the active view struct
+type View struct {
+	X, Y   float64 // the center of rectangle
+	hScale float64 // horizontal scale
+}
+
+var view = View{X: -0.717, Y: 0.23, hScale: 0.02}
+
+// Run is the active profile struct
+type Run struct {
+	Chunk      int // refresh rate of images
+	Iterations int // the number of iterations
+	NumPROCS   int // number of parallel goroutines for calculating the image (set to num of processors)
+	Density    int // color density - the higher the more color is visible in the image
+}
+
+// R is exported and gives the active run profile: iterations, chunk size, number
+// of processors and color density. These can be changed through the UI
+var R = Run{Chunk: 32, Iterations: 3000, NumPROCS: 4, Density: 8}
+
 var (
-	position   = 0            // from which to respond to next request
-	chunk      = 32           // refresh rate of images
-	iterations = 3000         //
-	numPROCS   = 4            // number of concurrent go routines - given by runtime.GOMAXPROCS(0)
-	cx, cy     = -0.717, 0.23 // real/imaginary coordinates of central point pixel (width/2,height/2)
-	hScale     = 0.02         // hScale = cx-0
-	density    = 8            // color
+	Px2S           func(pr, pd int) (float64, float64) // pixel to Cartesian
+	// PixelToComplex is the function that is exported to main and handles 
+	// the pixel --> Cmplx point translation, which changes with center and focus 
+	PixelToComplex func(p Point) complex128
 )
 
+var (
+	ImageChan   = make(chan []byte)   // outgoing to screen
+	RequestChan = make(chan struct{}) // incoming from user
+)
+
+// StartErver sets the two http handlers 
+// and fires up the web server on port 8000
 func StartServer() {
-	http.HandleFunc("/", serveContext)
+	// directory ../html serves all static content, including our index.html, mandelbrot.js
+	http.Handle("/", http.FileServer(http.Dir("../html")))
+	// the /image uri is for calling for image pieces from the js
 	http.HandleFunc("/image/", serveImage)
-	http.Handle("/static/",
-		http.StripPrefix("/static/", http.FileServer(http.Dir("../html"))))
+
 	log.Fatal(http.ListenAndServe("localhost:8000", nil))
-
-}
-
-// display the base html
-func serveContext(w http.ResponseWriter, r *http.Request) {
-	// ReadQueryString(r) // handle the querystring
-	// set the pixel to point mapping
-	// getTransforms()
-
-	w.Write([]byte(html.UI))
-}
-
-var ImageChan = make(chan []byte)
-var RequestChan = make(chan Request)
-var NewContext = make(chan struct{})
-
-type Direction int
-const (
-	none Direction = iota
-	in
-	out
-)
-
-type Request struct {
-	Point
-	focus Direction
-}
-var Z = Request{} // empty request
-
-// return a Mandelbrot image
-func serveImage(w http.ResponseWriter, r *http.Request) {
-	R := getImageReq(r) // handle the querystring
-	if R != Z {
-		fmt.Printf("Sending request: \n%+v\n", R)
-		RequestChan <- R
-		fmt.Println("Past receiving request ")
-	}
-	binary := <-ImageChan
-	w.Write(binary)
-}
-
-var seenr, seend int
-
-func getImageReq(r *http.Request) Request {
-	fmt.Println("request?")
-	checkF(r.ParseForm())
-	R := Request{}
-
-	var err error
-	var newr, newd int
-
-	for k, v := range r.Form {
-		if !(k == "newpt" || k == "in" || k == "out") {
-			continue
-		}
-		if k == "newpt" { // center data: pr|pd
-			w := strings.Split(v[0], "|")
-			newr, err = strconv.Atoi(w[0])
-			checkF(err)
-			newd, err = strconv.Atoi(w[1])
-			checkF(err)
-			if newr == seenr && newd == seend {
-				break // return Z
-			}
-			R.Right = newr
-			R.Down = newd
-
-			seenr = newr
-			seend = newd
-			// recenter
-			//cx, cy = Px2S(newr, newd)
-		}
-
-		if k == "in" { // scale in
-			//hScale = hScale * 3 / 4
-			R.focus = in
-		}
-
-		if k == "out" { // scale out
-			// hScale = hScale * 2
-			R.focus = out
-		}
-	}
-
-	return R
-}
-
-//var visited bool
-
-// getImageReq handles http requests from
-// user input: click and keyboard
-// uses 'visited' above so as not to repeat itself
-// func getImageReq0(r *http.Request) {
-
-// 	fmt.Println("called getImageReq")
-
-// 	checkF(r.ParseForm())
-
-// 	fmt.Printf("No parse error, \n%+v\n", r.Form)
-
-// 	var err error
-// 	for k, v := range r.Form {
-// 		if !(k == "newpt" || k == "in" || k == "out") {
-// 			continue
-// 		}
-
-// 		fmt.Println("getImageReq ...position: ", position)
-
-// 		visited = position != 0
-
-// 		if !visited {
-// 			var newr, newd int
-
-// 			if k == "newpt" { // center data: pr|pd
-// 				w := strings.Split(v[0], "|")
-// 				newr, err = strconv.Atoi(w[0])
-// 				if err != nil { // just use previous value
-// 					log.Printf("format error for %v : %v", k, err)
-// 					continue
-// 				}
-// 				newd, err = strconv.Atoi(w[1])
-// 				if err != nil { // just use previous value
-// 					log.Printf("format error for %v : %v", k, err)
-// 					continue
-// 				}
-// 				// recenter
-// 				cx, cy = Px2S(newr, newd)
-// 			}
-
-// 			if k == "in" { // scale in
-// 				hScale = hScale * 3 / 4
-// 			}
-
-// 			if k == "out" { // scale out
-// 				hScale = hScale * 2
-// 			}
-// 			// in all these cases, reset
-// 			getTransforms()
-// 			visited = true
-// 		}
-// 	}
-
-// }
-
-var numberType = map[string]int{
-	"m": 1, "r": 1, "num": 1, // 1 = int, 2 = float
-	"x": 2, "y": 2, "w": 2,
-	"dpx": 1, "dpy": 1,
-	"col": 1,
-}
-
-func ReadQueryString(r *http.Request) {
-	// read the form
-	checkF(r.ParseForm())
-
-	//set up our vars
-	for k, v := range r.Form {
-		if numberType[k] == 0 {
-			continue
-		}
-		var (
-			n   int
-			z   float64
-			err error
-		)
-		if numberType[k] == 1 { // int value
-			n, err = strconv.Atoi(v[0])
-		} else {
-			z, err = strconv.ParseFloat(v[0], 64)
-		}
-		if err != nil { // just use previous value
-			log.Printf("format error for %v : %v", k, err)
-			continue
-		}
-		switch k {
-		case "num":
-			iterations = n // global var number of  iterations
-		case "r":
-			chunk = n // global var chunk
-		case "m":
-			numPROCS = n // global var number of goroutines
-		case "x":
-			cx = z // global var center x coord
-		case "y":
-			cy = z // global var center y coord
-		case "w":
-			hScale = z // global var half a side
-		case "col":
-			density = n // change the hue
-		}
-	}
 }
 
 // Banner writes the details of the last build
 // at the top of the page
 func Banner() string {
-	sx := strconv.FormatFloat(cx, 'f', -1, 64)
-	sy := strconv.FormatFloat(cy, 'f', -1, 64)
-	sr := strconv.FormatFloat(hScale, 'f', -1, 64)
-	si := strconv.Itoa(iterations)
-	st := strconv.Itoa(chunk)
-	sm := strconv.Itoa(numPROCS)
-	sc := strconv.Itoa(density)
-	// the leading '_' below is a signal to the client that we are finished (see html.UI, js)
+	sx := strconv.FormatFloat(view.X, 'f', -1, 64)
+	sy := strconv.FormatFloat(view.Y, 'f', -1, 64)
+	sr := strconv.FormatFloat(view.hScale, 'f', -1, 64)
+	si := strconv.Itoa(R.Iterations)
+	st := strconv.Itoa(R.Chunk)
+	sm := strconv.Itoa(R.NumPROCS)
+	sc := strconv.Itoa(R.Density)
+	// the leading '_' below is a signal to the client that we are finished (see  mandel...js)
 	return "_" + sx + "_" + sy + "_" + sr + "_" + si + "_" + st + "_" + sm + "_" + sc
+}
+
+//================================ private =======================================
+
+
+// return a Mandelbrot image
+func serveImage(w http.ResponseWriter, r *http.Request) {
+	if getImageReq(r, &view) {
+		fmt.Printf("Sending request: %+v\n%v\n", view, r.Form)
+		// change center or focus
+		setTransforms()
+		RequestChan <- struct{}{} //
+	}
+
+	fmt.Printf("...view, request: %+v\n%v\n", view, r.Form)
+
+	binary := <-ImageChan
+	w.Write(binary)
+}
+
+func setTransforms() {
+	Px2S = math.Transformation(view.X, view.Y, view.hScale, width, height)
+	PixelToComplex = func(p Point) complex128 {
+		re, im := Px2S(p.Right, p.Down)
+		return complex(re, im)
+	}
+}
+
+func getImageReq(r *http.Request, v *View) bool {
+	var (
+		err        error
+		newr, newd int
+		n          int
+		z          float64
+	)
+
+	checkF(r.ParseForm())
+
+	for k, val := range r.Form {
+		if !(k == "newpt" || k == "in" || k == "out") {
+			continue
+		}
+		if k == "newpt" { // center data: pr|pd
+			w := strings.Split(val[0], "|")
+			newr, err = strconv.Atoi(w[0])
+			checkF(err)
+			newd, err = strconv.Atoi(w[1])
+			checkF(err)
+			v.X, v.Y = Px2S(newr, newd)
+		}
+		if k == "in" { // scale in
+			v.hScale = v.hScale * 3 / 4
+		}
+		if k == "out" { // scale out
+			v.hScale = 2 * v.hScale
+		}
+		if k == "num" || k == "r" || k == "m" || k == "col" { // int value
+			n, err = strconv.Atoi(val[0])
+			checkF(err)
+		}
+		if k == "x" || k == "y" || k == "w" {
+			z, err = strconv.ParseFloat(val[0], 64)
+			checkF(err)
+		}
+		switch k {
+		case "x":
+			v.X = z // global var center x coord
+		case "y":
+			v.Y = z // global var center y coord
+		case "w":
+			v.hScale = z // global var half a side
+		case "num":
+			R.Iterations = n // global var number of  iterations
+		case "r":
+			R.Chunk = n // global var chunk
+		case "m":
+			R.NumPROCS = n // global var number of goroutines
+		case "col":
+			R.Density = n // change the hue
+		}
+	}
+
+	return len(r.Form) > 0 // we had some changes
+}
+
+func init() {
+	setTransforms() // make sure that the base view is set up, main sets Px2C from this call
 }
 
 //======================= utility ================================
