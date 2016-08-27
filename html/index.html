@@ -8,7 +8,7 @@ Cache-Control:No-Cache;>
     <script type="text/javascript" src="mandelbrot.js"></script>
   </head>
   <body>
-    <form id=data onsubmit="return postPiece();">
+    <form id=data ">
       x: <input type="text" size=8 name="x">
       y: <input type="text" size=8 name="y">
       wd: <input type="text" size=5 name="w">
@@ -17,7 +17,7 @@ Cache-Control:No-Cache;>
       grs: <input type="text" size=3 name="m">
       clr: <input type="text" size=3 name="col">
       &nbsp;
-      <input type="submit" value="Submit">
+      <button id="getForm" type="button">Submit</button>
     </form>
     <p>
     <div id="imgs" style="position:relative">

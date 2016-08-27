@@ -79,18 +79,45 @@ func Banner() string {
 
 //================================ private =======================================
 
+
+const indexHtml = `
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN"
+   "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd"
+Cache-Control:No-Cache;>
+<html>
+  <head>
+  <title>Mandelbrot</title>
+    <script type="text/javascript" src="jquery-1.9.1.min.js"></script>
+    <script type="text/javascript" src="mandelbrot.js"></script>
+  </head>
+  <body>
+    <form id=data >
+      x: <input type="text" size=8 name="x">
+      y: <input type="text" size=8 name="y">
+      wd: <input type="text" size=5 name="w">
+      itrs: <input type="text" size=3 name="num">
+      refr: <input type="text" size=3 name="r">
+      grs: <input type="text" size=3 name="m">
+      clr: <input type="text" size=3 name="col">
+      &nbsp;
+      <input type="submit" value="Submit">
+    </form>
+    <p>
+    <div id="imgs" style="position:relative">
+    </div>
+  </body>
+</html>
+`
 // return a Mandelbrot image
 func serveImage(w http.ResponseWriter, r *http.Request) {
 	if getImageReq(r, &view) {
 		fmt.Printf("Sending request: %+v\n%v\n", view, r.Form)
 		// change center or focus
 		setTransforms()
-		RequestChan <- struct{}{} //
+		RequestChan <- struct{}{} // signal readiness for data
 	}
 
-	//fmt.Printf("...view, request: %+v\n%v\n", view, r.Form)
-
-	w.Write(<-ImageChan) // binary
+	w.Write( <-ImageChan )
 }
 
 func setTransforms() {
@@ -166,6 +193,8 @@ fmt.Printf("count, request: %d\n%v\n", count, r.Form)
 func init() {
 	setTransforms() // make sure that the base view is set up, main sets Px2C from this call
 }
+
+
 
 //======================= utility ================================
 
