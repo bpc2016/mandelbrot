@@ -1,8 +1,32 @@
-// Package ui is teh user interface part
+// Package ui handles and sets up the user interface.
+// The natural navigation aides presented by the UI are
+//
+// (1) mouse click : this recenters the Mandelbrot calculation. The selected point becomes the new
+// rectangle's center. Then the keyboard shortcuts ...
+//
+// (2) + : zoom in with the same center
+//
+// (3) - - : zoom out   
+//
+// Finer control is provided by text fields at the top of the image which displays current settings
+// but from which can be entered
+//
+// x  -   real part of the center point in C
+//
+// y  -   imaginary part of the center
+//
+// wd -   width of the rectangle in C (the height is scaled accordingly)
+//
+// itrs - number of  iterations
+//
+// refr - determines the size of each partial image, hence the refresh rate
+//
+// gors - coloring uses this number of parallel computations
+//
+// clr  - the larger this value the higher the color variation of the image
 package ui
 
 import (
-	"fmt"
 	"log"
 	"mandelbrot/math"
 	"net/http"
@@ -10,12 +34,12 @@ import (
 	"strings"
 )
 
+// The rectangle dimensions in pixels
 const (
 	Width, Height = 1024, 512
 )
 
-// View is the active view struct - the rectangle
-// in C we are examining Mandelbrot
+// View is the active view struct - the rectangle in the Complex plane where we are examining Mandelbrot
 type View struct {
 	X, Y   float64 // the center of rectangle in the Cplx plane
 	Hwidth float64 // horizontal width of this rectangle
@@ -23,62 +47,76 @@ type View struct {
 
 var view = View{X: -0.717, Y: 0.23, Hwidth: 0.02}
 
-// Run is the active profile struct
-type Run struct {
+// Context is the active profile struct
+type Context struct {
 	Chunk      int // refresh rate of images
 	Iterations int // the number of iterations
 	NumPROCS   int // number of parallel goroutines for calculating the image (set to num of processors)
 	Density    int // color density - the higher the more color is visible in the image
 }
 
-// R is exported and gives the active run profile: iterations, chunk size, number
+// Ctx gives the active profile: iterations, chunk size, number
 // of processors and color density. These can be changed through the UI
-var R = Run{Chunk: 32, Iterations: 3000, NumPROCS: 4, Density: 8}
+var Ctx = Context{Chunk: 32, Iterations: 3000, NumPROCS: 4, Density: 8}
 
-// Point is a pixel
+// Point on the screen - given by the Right and Down pixels from the Top Left corner (0,0)
 type Point struct {
 	Right int // right from TL corner (0,0)
 	Down  int // down from ""
 }
 
+// PixelToComplex is the pixel --> Cmplx point translation, which changes with center and focus.
+// It is exported as Px2C
 var (
-	Px2S func(pr, pd int) (float64, float64) // pixel to Cartesian
-	// PixelToComplex is the function that is exported to main and handles
-	// the pixel --> Cmplx point translation, which changes with center and focus
 	PixelToComplex func(p Point) complex128
+	px2cart func(pr, pd int) (float64, float64) // pixel to Cartesian
 )
 
 var (
-	ImageChan   = make(chan []byte)   // screen <--- base64 
+	ImageChan   = make(chan []byte)   // screen <--- base64
 	RequestChan = make(chan struct{}) // <--- user
 )
 
-// StartErver sets the two http handlers and fires up the web server on port 8000
+// StartServer configures the http handlers and fires up the web server on port 8000
 func StartServer() {
-	// ../html serves all static content, incls: index.html, mandelbrot.js
-	http.Handle("/", http.FileServer(http.Dir("../html")))
+	// entry - index.html
+	http.HandleFunc("/", serveContext)
+	// static content, incls: jquery, mandelbrot.js
+	http.Handle("/html/",
+		http.StripPrefix("/html/", http.FileServer(http.Dir("../html"))))
 	// the /image uri is for calling for image pieces from the js
 	http.HandleFunc("/image/", serveImage)
 
 	log.Fatal(http.ListenAndServe("localhost:8000", nil))
 }
 
-// Banner writes the details of the last build
-// at the top of the page
+// Banner writes the details of the last run to the top of the page
 func Banner() string {
 	sx := strconv.FormatFloat(view.X, 'f', -1, 64)
 	sy := strconv.FormatFloat(view.Y, 'f', -1, 64)
 	sr := strconv.FormatFloat(view.Hwidth, 'f', -1, 64)
-	si := strconv.Itoa(R.Iterations)
-	st := strconv.Itoa(R.Chunk)
-	sm := strconv.Itoa(R.NumPROCS)
-	sc := strconv.Itoa(R.Density)
+	si := strconv.Itoa(Ctx.Iterations)
+	st := strconv.Itoa(Ctx.Chunk)
+	sm := strconv.Itoa(Ctx.NumPROCS)
+	sc := strconv.Itoa(Ctx.Density)
 	// the leading '_' below is a signal to the client that we are finished (see  mandel...js)
 	return "_" + sx + "_" + sy + "_" + sr + "_" + si + "_" + st + "_" + sm + "_" + sc
 }
 
 //================================ private =======================================
 
+var firstTime = true
+
+func serveContext(w http.ResponseWriter, r *http.Request) {
+	// this si to accommodate refresh of the url after the start .. a headache!
+	if ! firstTime {
+		RequestChan <- struct{}{} // signal readiness for data
+	}
+	if firstTime{ // we set this the once 
+		firstTime = false
+	}
+	w.Write([]byte(indexHtml))
+}
 
 const indexHtml = `
 <!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN"
@@ -87,11 +125,11 @@ Cache-Control:No-Cache;>
 <html>
   <head>
   <title>Mandelbrot</title>
-    <script type="text/javascript" src="jquery-1.9.1.min.js"></script>
-    <script type="text/javascript" src="mandelbrot.js"></script>
+    <script type="text/javascript" src="html/jquery-1.9.1.min.js"></script>
+    <script type="text/javascript" src="html/mandelbrot.js"></script>
   </head>
   <body>
-    <form id=data >
+    <form id=data ">
       x: <input type="text" size=8 name="x">
       y: <input type="text" size=8 name="y">
       wd: <input type="text" size=5 name="w">
@@ -100,7 +138,7 @@ Cache-Control:No-Cache;>
       grs: <input type="text" size=3 name="m">
       clr: <input type="text" size=3 name="col">
       &nbsp;
-      <input type="submit" value="Submit">
+      <button id="getForm" type="button">Submit</button>
     </form>
     <p>
     <div id="imgs" style="position:relative">
@@ -108,29 +146,28 @@ Cache-Control:No-Cache;>
   </body>
 </html>
 `
+
 // return a Mandelbrot image
 func serveImage(w http.ResponseWriter, r *http.Request) {
-	if getImageReq(r, &view) {
-		fmt.Printf("Sending request: %+v\n%v\n", view, r.Form)
-		// change center or focus
+	if gotRequest(r, &view, &Ctx) {
 		setTransforms()
 		RequestChan <- struct{}{} // signal readiness for data
 	}
 
-	w.Write( <-ImageChan )
+	w.Write(<-ImageChan)
 }
 
 func setTransforms() {
-	Px2S = math.Transformation(view.X, view.Y, view.Hwidth, Width, Height)
+	px2cart = math.Transformation(view.X, view.Y, view.Hwidth, Width, Height)
 	PixelToComplex = func(p Point) complex128 {
-		re, im := Px2S(p.Right, p.Down)
+		re, im := px2cart(p.Right, p.Down)
 		return complex(re, im)
 	}
 }
 
 var count int
 
-func getImageReq(r *http.Request, v *View) bool {
+func gotRequest(r *http.Request, v *View, ctx *Context) bool {
 	var (
 		err        error
 		newr, newd int
@@ -138,22 +175,16 @@ func getImageReq(r *http.Request, v *View) bool {
 		z          float64
 	)
 
-count++
-fmt.Printf("count, request: %d\n%v\n", count, r.Form)
-
 	checkF(r.ParseForm())
 
 	for k, val := range r.Form {
-		if !(k == "newpt" || k == "in" || k == "out") {
-			continue
-		}
 		if k == "newpt" { // center data: pr|pd
 			w := strings.Split(val[0], "|")
 			newr, err = strconv.Atoi(w[0])
 			checkF(err)
 			newd, err = strconv.Atoi(w[1])
 			checkF(err)
-			v.X, v.Y = Px2S(newr, newd)
+			v.X, v.Y = px2cart(newr, newd)
 		}
 		if k == "in" { // scale in
 			v.Hwidth = v.Hwidth * 3 / 4
@@ -177,13 +208,13 @@ fmt.Printf("count, request: %d\n%v\n", count, r.Form)
 		case "w":
 			v.Hwidth = z // global var half a side
 		case "num":
-			R.Iterations = n // global var number of  iterations
+			ctx.Iterations = n // global var number of  iterations
 		case "r":
-			R.Chunk = n // global var chunk
+			ctx.Chunk = n // global var chunk
 		case "m":
-			R.NumPROCS = n // global var number of goroutines
+			ctx.NumPROCS = n // global var number of goroutines
 		case "col":
-			R.Density = n // change the hue
+			ctx.Density = n // change the hue
 		}
 	}
 
@@ -193,8 +224,6 @@ fmt.Printf("count, request: %d\n%v\n", count, r.Form)
 func init() {
 	setTransforms() // make sure that the base view is set up, main sets Px2C from this call
 }
-
-
 
 //======================= utility ================================
 

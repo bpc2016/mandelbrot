@@ -1,12 +1,10 @@
-// Package rgba holds the actual Mandelbrot routine
-// this is responsible for coloring individual pixels in the image
+// Package rgba returns a palette of 255*6 = 1530 RGB colors.
 package rgba
 
 import (
 	"image/color"
 	"mandelbrot/math"
 )
-
 
 /*
 var wheel = []color.Color{
@@ -19,6 +17,7 @@ var wheel = []color.Color{
 }
 */
 
+// This is the array of (unit) 'differences' between sucessive colors around the RGB wheel
 var diffArray = []int{
 	0x100,    // {0, 1, 0},
 	-0x10000, // {-1, 0, 0},
@@ -28,12 +27,12 @@ var diffArray = []int{
 	-0x1,     // {0, 0, -1},
 }
 
-// MakePalette contructs a palette
-// of 255*6 colors starting at Red{255,0,0}
-// it des this by walking  the sides of a square
+// MakePalette contructs a palette of 255*6 colors starting at Red {255,0,0}
+// by walking a circuit around a cube, interpolating a single dimension at a time.
+// The palette itself consists of the RGB coordinates of each color.
 func MakePalette() []color.RGBA {
 	var a = [3]uint8{}
-	v := 0xff0000 // <--> {255, 0, 0}
+	v := 0xff0000 // <--> {255, 0, 0} : RED
 	r := []color.RGBA{}
 	for i := 0; i < 6; i++ {
 		for j := 0; j < 255; j++ {

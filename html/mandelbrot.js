@@ -26,7 +26,7 @@ function fetchPiece(extra) {
 	          $(h).appendTo("#imgs");
 	          ind+=2;
 	          console.log('ind=',ind)
-	          fetchPiece()
+	          fetchPiece() // on recursion - drop the extra
 	        } else {
 	          console.log('no more pieces')
 	        }
@@ -36,7 +36,7 @@ function fetchPiece(extra) {
 	   });
 }
 
-// fill form with data from server
+// fill form with data from server ( v[0]=='_' )
 function loadForm(v){
 	$("input[name='x']").val(v[1])
 	$("input[name='y']").val(v[2])
