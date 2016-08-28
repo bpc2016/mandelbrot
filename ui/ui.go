@@ -6,7 +6,7 @@
 //
 // (2) + : zoom in with the same center
 //
-// (3) - - : zoom out   
+// (3) - - : zoom out
 //
 // Finer control is provided by text fields at the top of the image which displays current settings
 // but from which can be entered
@@ -57,7 +57,7 @@ type Context struct {
 
 // Ctx gives the active profile: iterations, chunk size, number
 // of processors and color density. These can be changed through the UI
-var Ctx = Context{Chunk: 32, Iterations: 3000, NumPROCS: 4, Density: 8}
+var Ctx = Context{Chunk: 32, Iterations: 2000, NumPROCS: 4, Density: 8}
 
 // Point on the screen - given by the Right and Down pixels from the Top Left corner (0,0)
 type Point struct {
@@ -69,22 +69,19 @@ type Point struct {
 // It is exported as Px2C
 var (
 	PixelToComplex func(p Point) complex128
-	px2cart func(pr, pd int) (float64, float64) // pixel to Cartesian
+	px2cart        func(pr, pd int) (float64, float64) // pixel to Cartesian
 )
 
 var (
-	ImageChan   = make(chan []byte)   // screen <--- base64
-	RequestChan = make(chan struct{}) // <--- user
+	Base64Ready = make(chan []byte)   // screen <--- base64
+	NextPlease  = make(chan struct{}) // <--- user
 )
 
 // StartServer configures the http handlers and fires up the web server on port 8000
 func StartServer() {
-	// entry - index.html
 	http.HandleFunc("/", serveContext)
-	// static content, incls: jquery, mandelbrot.js
 	http.Handle("/html/",
 		http.StripPrefix("/html/", http.FileServer(http.Dir("../html"))))
-	// the /image uri is for calling for image pieces from the js
 	http.HandleFunc("/image/", serveImage)
 
 	log.Fatal(http.ListenAndServe("localhost:8000", nil))
@@ -108,11 +105,10 @@ func Banner() string {
 var firstTime = true
 
 func serveContext(w http.ResponseWriter, r *http.Request) {
-	// this si to accommodate refresh of the url after the start .. a headache!
-	if ! firstTime {
-		RequestChan <- struct{}{} // signal readiness for data
+	if !firstTime { // this is to accommodate refresh of the url after the start .. a headache!
+		NextPlease <- struct{}{} 
 	}
-	if firstTime{ // we set this the once 
+	if firstTime {
 		firstTime = false
 	}
 	w.Write([]byte(indexHtml))
@@ -151,10 +147,10 @@ Cache-Control:No-Cache;>
 func serveImage(w http.ResponseWriter, r *http.Request) {
 	if gotRequest(r, &view, &Ctx) {
 		setTransforms()
-		RequestChan <- struct{}{} // signal readiness for data
+		NextPlease <- struct{}{} // signal readiness for data
 	}
 
-	w.Write(<-ImageChan)
+	w.Write(<-Base64Ready)
 }
 
 func setTransforms() {
@@ -178,18 +174,18 @@ func gotRequest(r *http.Request, v *View, ctx *Context) bool {
 	checkF(r.ParseForm())
 
 	for k, val := range r.Form {
-		if k == "newpt" { // center data: pr|pd
+		if k == "newpt" { 
 			w := strings.Split(val[0], "|")
 			newr, err = strconv.Atoi(w[0])
-			checkF(err)
+			checkF(err) // TODO - make this more forgiving: use prev values
 			newd, err = strconv.Atoi(w[1])
 			checkF(err)
 			v.X, v.Y = px2cart(newr, newd)
 		}
-		if k == "in" { // scale in
+		if k == "in" { 
 			v.Hwidth = v.Hwidth * 3 / 4
 		}
-		if k == "out" { // scale out
+		if k == "out" {
 			v.Hwidth = 2 * v.Hwidth
 		}
 		if k == "num" || k == "r" || k == "m" || k == "col" { // int value
@@ -202,19 +198,19 @@ func gotRequest(r *http.Request, v *View, ctx *Context) bool {
 		}
 		switch k {
 		case "x":
-			v.X = z // global var center x coord
+			v.X = z 
 		case "y":
-			v.Y = z // global var center y coord
+			v.Y = z 
 		case "w":
-			v.Hwidth = z // global var half a side
+			v.Hwidth = z
 		case "num":
-			ctx.Iterations = n // global var number of  iterations
+			ctx.Iterations = n 
 		case "r":
-			ctx.Chunk = n // global var chunk
+			ctx.Chunk = n 
 		case "m":
-			ctx.NumPROCS = n // global var number of goroutines
+			ctx.NumPROCS = n 
 		case "col":
-			ctx.Density = n // change the hue
+			ctx.Density = n 
 		}
 	}
 
