@@ -32,6 +32,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"fmt"
 )
 
 // The rectangle dimensions in pixels
@@ -111,6 +112,9 @@ func serveContext(w http.ResponseWriter, r *http.Request) {
 	if firstTime {
 		firstTime = false
 	}
+	
+	fmt.Printf("serveContext check r: %v\n",r.Form)
+
 	w.Write([]byte(indexHtml))
 }
 
@@ -145,7 +149,10 @@ Cache-Control:No-Cache;>
 
 // return a Mandelbrot image
 func serveImage(w http.ResponseWriter, r *http.Request) {
+
+	
 	if gotRequest(r, &view, &Ctx) {
+		fmt.Printf("serveImage check r: %v\n",r.Form)
 		setTransforms()
 		NextPlease <- struct{}{} // signal readiness for data
 	}
@@ -173,6 +180,8 @@ func gotRequest(r *http.Request, v *View, ctx *Context) bool {
 
 	checkF(r.ParseForm())
 
+		fmt.Printf("gotRequest check r: %v\n",r.Form)
+		
 	for k, val := range r.Form {
 		if k == "newpt" { 
 			w := strings.Split(val[0], "|")
