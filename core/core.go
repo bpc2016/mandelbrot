@@ -9,7 +9,7 @@
 // available coprocessors.
 //
 // The production and display are controlled by a go channel (between the ui package and main) and a succession
-// of ajax GET calls from the user's web page 
+// of ajax GET calls from the user's web page
 package core
 
 import (
@@ -27,24 +27,29 @@ import (
 	"math/cmplx"
 )
 
+// N is the total number of pixels teh screen has
 const N = ui.Width * ui.Height // number of pixels
-const tookTooLong = 0                    // flag failure, color Black
+
+const tookTooLong = 0          // flag failure, color Black
 var (
-	Paint    func(d int) color.RGBA // we color a point by associated number d
-	Sigma    func(d int) int        // returns the application of our permutation on integer d
-	Px2C     = ui.PixelToComplex    // converts a screen point (pixels) to a complex number
-	Pixel    [N]ui.Point            // the array of all the screen points
+	paint  func(d int) color.RGBA // we color a point by associated number d
+	sigma  func(d int) int        // returns the application of our permutation on integer d
+	px2cx  = ui.PixelToComplex    // converts a screen point (pixels) to a complex number
+	pixels [N]ui.Point            // the array of all the screen points
 )
-var numPROCS = ui.Ctx.NumPROCS      // number of parallel goroutines - here, I've used runtime.GOMAXPROCS(0)
+var numPROCS = ui.Ctx.NumPROCS // number of parallel goroutines - here, I've used runtime.GOMAXPROCS(0)
+
+// LastPiece tells main that the core is finished sending pieces of the partialImage
+const LastPiece = -1
 
 // PartialFrom commissions numProcs goroutines to generate images starting from position.
-// The  resulting composite is at most 1024*ui.Ctx.Chunk bytes long.
-func PartialFrom(position int) []byte {
+// It returns the image togeter with the next starting position for another image
+func PartialFrom(position int) ([]byte, int) {
 	partialImageChan := make(chan image.Image)
 
 	// set the partial image go routines going
 	for gor := 0; gor < numPROCS; gor++ {
-		go BuildImage(gor, position, partialImageChan)
+		go buildImage(gor, position, partialImageChan)
 	}
 
 	var partialimage *image.RGBA
@@ -63,12 +68,16 @@ func PartialFrom(position int) []byte {
 			close(partialImageChan)
 		}
 	}
+	nextPosition := position + 1024*ui.Ctx.Chunk
+	if nextPosition >= N {
+		nextPosition = LastPiece //signal we are finished
+	}
 	// the assembly loop had blocked, and now we process result ....
-	return Encoded(partialimage)
+	return encoded(partialimage), nextPosition
 }
 
-// Encoded returns the byte slice of image after conversion to PNG then Base64 encoding
-func Encoded(image *image.RGBA) []byte {
+// encoded returns the byte slice of image after conversion to PNG then Base64 encoding
+func encoded(image *image.RGBA) []byte {
 	// generate PNG
 	bufIn := new(bytes.Buffer)
 	png.Encode(io.Writer(bufIn), image) // NOTE: ignoring errors, to an io.Writer
@@ -82,10 +91,10 @@ func Encoded(image *image.RGBA) []byte {
 	return bufOut.Bytes()
 }
 
-// BuildImage generates a partial image of the Mandelbrot set and sends
-// this to partialImageChan. This is called in a goroutine indexed by part <= numPROCS
+// buildImage generates a partial image of the Mandelbrot set and sends
+// this to ch. This is called in a goroutine indexed by part <= numPROCS
 // and draws a selection of the pixels - as given by the position parameter
-func BuildImage(part int, position int, partialImageChan chan image.Image) {
+func buildImage(part int, position int, ch chan image.Image) {
 	img := image.NewRGBA(image.Rect(0, 0, ui.Width, ui.Height))
 	draw.Draw(img, img.Bounds(), image.Transparent, image.ZP, draw.Src)
 
@@ -97,13 +106,13 @@ func BuildImage(part int, position int, partialImageChan chan image.Image) {
 		if k%numPROCS != part { // choose our residue class
 			continue
 		}
-		p := Pixel[Sigma(k)] // use our permutation
-		z := Px2C(p)
+		p := pixels[sigma(k)] // use our permutation
+		z := px2cx(p)
 		d := mandelBrot(z)
-		color := Paint(d) // use our color density
+		color := paint(d) // use our color density
 		img.Set(p.Right, p.Down, color)
 	}
-	partialImageChan <- img
+	ch <- img // send to teh channel
 }
 
 // mandelBrot performs the iteration from point z
@@ -126,22 +135,21 @@ func init() {
 	k := 0
 	for down := 0; down < ui.Height; down++ {
 		for right := 0; right < ui.Width; right++ {
-			Pixel[k] = ui.Point{right, down}
+			pixels[k] = ui.Point{right, down}
 			k++
 		}
 	}
 
-	Sigma = math.RandPermFunc(N) // we walk through pixels with this
+	sigma = math.RandPermFunc(N) // we walk through pixels with this
 
-	Rainbow := rgba.ColorWheel()
-	Paint = func(d int) color.RGBA {
+	wheel := rgba.ColorWheel()
+	paint = func(d int) color.RGBA {
 		if d == tookTooLong {
 			return color.RGBA{0, 0, 0, 255}
 		}
 		d *= ui.Ctx.Density    // for greater color depth
-		return Rainbow[d%1530] // len(Rainbow) = 255*6
+		return wheel[d%1530] // len(wheel) = 255*6
 	}
 
 	fmt.Println("MandelBrot server started on  http://localhost:8000")
 }
-

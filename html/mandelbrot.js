@@ -4,7 +4,7 @@ var ind = 1;
 function fetchPiece(extra) {
 	var qs = 'http://localhost:8000/image/';
 	if (extra) qs = qs+"?"+extra
-	console.log('get qs = ', qs)
+	//console.log('get qs = ', qs)
 	busy = true
 	$.get(qs)
 	    .done(function(result){
@@ -25,7 +25,6 @@ function fetchPiece(extra) {
 	              '"></img>'].join('');
 	          $(h).appendTo("#imgs");
 	          ind+=2;
-	          console.log('ind=',ind)
 	          fetchPiece("ctd=1") // on recursion - drop the extra
 	        } else {
 	          console.log('no more pieces')

@@ -7,18 +7,21 @@ import (
 	"mandelbrot/ui"
 )
 
-const N = ui.Width * ui.Height // N is the total number of pixels in the screen display
 
 func main() {
 	go ui.StartServer()
+	j := 0
 	for {
-		<-ui.RequestImage // wait for this
-		 
-		for j := 0; j < N; j += 1024 * ui.Ctx.Chunk {
-			ui.Base64Ready <- core.PartialFrom(j)
+		<-ui.RequestImage // wait for user 
+
+		for j != core.LastPiece {
+			image, nextJ := core.PartialFrom(j)
+			ui.Base64Ready <- image 
+			j = nextJ
 		}
 		banner := []byte(ui.Banner())
 		ui.Base64Ready <- banner // banner indicates end of sending the image
+		j = 0
 		// <-ui.NextPlease          // wait for a request
 	}
 }
