@@ -32,7 +32,6 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
-	//"fmt"
 )
 
 // The rectangle dimensions in pixels
@@ -73,9 +72,11 @@ var (
 	px2cart        func(pr, pd int) (float64, float64) // pixel to Cartesian
 )
 
+// Base64Ready is the channel that carries binary data from the core to the user's web page
+// RequestImage signals to main that the previous chunk of image has been consumed (comes from js)
 var (
-	Base64Ready = make(chan []byte)   // screen <--- base64
-	RequestImage  = make(chan struct{}) // <--- user
+	Base64Ready  = make(chan []byte)   // screen <--- base64
+	RequestImage = make(chan struct{}) // <--- user
 )
 
 // StartServer configures the http handlers and fires up the web server on port 8000
@@ -144,7 +145,6 @@ func serveImage(w http.ResponseWriter, r *http.Request) {
 		setTransforms()
 		RequestImage <- struct{}{} // signal readiness for data
 	}
-
 	w.Write(<-Base64Ready)
 }
 
@@ -159,57 +159,53 @@ func setTransforms() {
 var count int
 
 func resetLocation(r *http.Request, v *View, ctx *Context) bool {
-	var (
-		err        error
-		newr, newd int
-		n          int
-		z          float64
-	)
-
+	var err error
+	var newr, newd int
+	var n int
+	var z float64
 	var newLocation = true
 
 	checkF(r.ParseForm())
+
 	for k, val := range r.Form {
-		if k == "ctd" {
-			newLocation = false 
-		}
-		if k == "newpt" { 
+		switch k {
+		case "ctd":
+			newLocation = false // the only one to ignore
+		case "newpt":
 			w := strings.Split(val[0], "|")
 			newr, err = strconv.Atoi(w[0])
 			checkF(err) // TODO - make this more forgiving: use prev values
 			newd, err = strconv.Atoi(w[1])
 			checkF(err)
 			v.X, v.Y = px2cart(newr, newd)
-		}
-		if k == "in" { 
+		case "in":
 			v.Hwidth = v.Hwidth * 3 / 4
-		}
-		if k == "out" {
+		case "out":
 			v.Hwidth = 2 * v.Hwidth
-		}
-		if k == "num" || k == "r" || k == "m" || k == "col" { // int value
+		// conversions
+		case "num", "r", "m", "col": // int value
 			n, err = strconv.Atoi(val[0])
 			checkF(err)
-		}
-		if k == "x" || k == "y" || k == "w" {
+		case "x", "y", "w":
 			z, err = strconv.ParseFloat(val[0], 64)
 			checkF(err)
 		}
+		// now look at the converted values
 		switch k {
 		case "x":
-			v.X = z 
+			v.X = z
 		case "y":
-			v.Y = z 
+			v.Y = z
 		case "w":
 			v.Hwidth = z
 		case "num":
-			ctx.Iterations = n 
+			ctx.Iterations = n
 		case "r":
-			ctx.Chunk = n 
+			ctx.Chunk = n
 		case "m":
-			ctx.NumPROCS = n 
+			ctx.NumPROCS = n
 		case "col":
-			ctx.Density = n 
+			ctx.Density = n
 		}
 	}
 
