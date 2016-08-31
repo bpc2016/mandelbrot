@@ -20,22 +20,22 @@ import (
 	"image/color"
 	"image/draw"
 	"image/png"
-	"io"
+	//"io"
 	"mandelbrot/math"
 	"mandelbrot/rgba"
 	"mandelbrot/ui"
 	"math/cmplx"
 )
 
-// N is the total number of pixels teh screen has
-const N = ui.Width * ui.Height // number of pixels
+// totalPixels is the total number of pixels teh screen has
+const totalPixels = ui.Width * ui.Height // number of pixels
 
 const tookTooLong = 0          // flag failure, color Black
 var (
 	paint  func(d int) color.RGBA // we color a point by associated number d
 	sigma  func(d int) int        // returns the application of our permutation on integer d
 	px2cx  = ui.PixelToComplex    // converts a screen point (pixels) to a complex number
-	pixels [N]ui.Point            // the array of all the screen points
+	pixels [totalPixels]ui.Point            // the array of all the screen points
 )
 var numPROCS = ui.Ctx.NumPROCS // number of parallel goroutines - here, I've used runtime.GOMAXPROCS(0)
 
@@ -69,7 +69,7 @@ func PartialFrom(position int) ([]byte, int) {
 		}
 	}
 	nextPosition := position + 1024*ui.Ctx.Chunk
-	if nextPosition >= N {
+	if nextPosition >= totalPixels {
 		nextPosition = LastPiece //signal we are finished
 	}
 	// the assembly loop had blocked, and now we process result ....
@@ -80,11 +80,12 @@ func PartialFrom(position int) ([]byte, int) {
 func encoded(image *image.RGBA) []byte {
 	// generate PNG
 	bufIn := new(bytes.Buffer)
-	png.Encode(io.Writer(bufIn), image) // NOTE: ignoring errors, to an io.Writer
+	// png.Encode(io.Writer(bufIn), image) // NOTE: ignoring errors, to an io.Writer
+	png.Encode(bufIn, image) // NOTE: ignoring errors, to an io.Writer
 
 	// convert to Base64
 	bufOut := new(bytes.Buffer)
-	encoder := base64.NewEncoder(base64.StdEncoding, io.Writer(bufOut)) // send to target w
+	encoder := base64.NewEncoder(base64.StdEncoding, bufOut) // send to target w
 	encoder.Write(bufIn.Bytes())
 	encoder.Close()
 
@@ -99,8 +100,8 @@ func buildImage(part int, position int, ch chan image.Image) {
 	draw.Draw(img, img.Bounds(), image.Transparent, image.ZP, draw.Src)
 
 	endposition := position + 1024*ui.Ctx.Chunk
-	if endposition > N {
-		endposition = N
+	if endposition > totalPixels {
+		endposition = totalPixels
 	}
 	for k := position; k < endposition; k++ {
 		if k%numPROCS != part { // choose our residue class
@@ -140,7 +141,7 @@ func init() {
 		}
 	}
 
-	sigma = math.RandPermFunc(N) // we walk through pixels with this
+	sigma = math.RandPermFunc(totalPixels) // we walk through pixels with this
 
 	wheel := rgba.ColorWheel()
 	paint = func(d int) color.RGBA {

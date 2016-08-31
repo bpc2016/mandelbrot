@@ -20,8 +20,13 @@ func main() {
 			j = nextJ
 		}
 		banner := []byte(ui.Banner())
-		ui.Base64Ready <- banner // banner indicates end of sending the image
+		ui.Base64Ready <- banner 
 		j = 0
-		// <-ui.NextPlease          // wait for a request
 	}
 }
+// TODO - convert the jquery material to pure js, so that this a well as
+// mandelbrot.js can be subsumed in the constant indexHTML - then the entire
+// program is independent of location - NO need for static html
+
+// TODO - furtehr study of the use of a linear color scheme - clearly wants a prior run
+// to determine the extent of the possible 'n' values <---> colors 
