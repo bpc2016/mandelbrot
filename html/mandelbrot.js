@@ -26,7 +26,7 @@ function fetchPiece(extra) {
 	          $(h).appendTo("#imgs");
 	          ind+=2;
 	          console.log('ind=',ind)
-	          fetchPiece() // on recursion - drop the extra
+	          fetchPiece("ctd=1") // on recursion - drop the extra
 	        } else {
 	          console.log('no more pieces')
 	        }
@@ -63,7 +63,7 @@ $(document).keypress(function(e){
 
 $(document).ready(function(){
   	// fetch the image with an ajax call ..
-  	fetchPiece()
+  	fetchPiece("reset=1")
 
 	// mouse click - this one needs to be inside document.ready !!
 	$("#imgs").click(function(e){

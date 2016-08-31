@@ -12,11 +12,13 @@ const N = ui.Width * ui.Height // N is the total number of pixels in the screen 
 func main() {
 	go ui.StartServer()
 	for {
+		<-ui.RequestImage // wait for this
+		 
 		for j := 0; j < N; j += 1024 * ui.Ctx.Chunk {
 			ui.Base64Ready <- core.PartialFrom(j)
 		}
 		banner := []byte(ui.Banner())
 		ui.Base64Ready <- banner // banner indicates end of sending the image
-		<-ui.NextPlease          // wait for a request
+		// <-ui.NextPlease          // wait for a request
 	}
 }

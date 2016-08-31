@@ -32,7 +32,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
-	"fmt"
+	//"fmt"
 )
 
 // The rectangle dimensions in pixels
@@ -75,7 +75,7 @@ var (
 
 var (
 	Base64Ready = make(chan []byte)   // screen <--- base64
-	NextPlease  = make(chan struct{}) // <--- user
+	RequestImage  = make(chan struct{}) // <--- user
 )
 
 // StartServer configures the http handlers and fires up the web server on port 8000
@@ -106,19 +106,10 @@ func Banner() string {
 var firstTime = true
 
 func serveContext(w http.ResponseWriter, r *http.Request) {
-	if !firstTime { // this is to accommodate refresh of the url after the start .. a headache!
-		NextPlease <- struct{}{} 
-	}
-	if firstTime {
-		firstTime = false
-	}
-	
-	fmt.Printf("serveContext check r: %v\n",r.Form)
-
-	w.Write([]byte(indexHtml))
+	w.Write([]byte(indexHTML))
 }
 
-const indexHtml = `
+const indexHTML = `
 <!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN"
    "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd"
 Cache-Control:No-Cache;>
@@ -149,12 +140,9 @@ Cache-Control:No-Cache;>
 
 // return a Mandelbrot image
 func serveImage(w http.ResponseWriter, r *http.Request) {
-
-	
-	if gotRequest(r, &view, &Ctx) {
-		fmt.Printf("serveImage check r: %v\n",r.Form)
+	if resetLocation(r, &view, &Ctx) {
 		setTransforms()
-		NextPlease <- struct{}{} // signal readiness for data
+		RequestImage <- struct{}{} // signal readiness for data
 	}
 
 	w.Write(<-Base64Ready)
@@ -170,7 +158,7 @@ func setTransforms() {
 
 var count int
 
-func gotRequest(r *http.Request, v *View, ctx *Context) bool {
+func resetLocation(r *http.Request, v *View, ctx *Context) bool {
 	var (
 		err        error
 		newr, newd int
@@ -178,11 +166,13 @@ func gotRequest(r *http.Request, v *View, ctx *Context) bool {
 		z          float64
 	)
 
-	checkF(r.ParseForm())
+	var newLocation = true
 
-		fmt.Printf("gotRequest check r: %v\n",r.Form)
-		
+	checkF(r.ParseForm())
 	for k, val := range r.Form {
+		if k == "ctd" {
+			newLocation = false 
+		}
 		if k == "newpt" { 
 			w := strings.Split(val[0], "|")
 			newr, err = strconv.Atoi(w[0])
@@ -223,7 +213,7 @@ func gotRequest(r *http.Request, v *View, ctx *Context) bool {
 		}
 	}
 
-	return len(r.Form) > 0 // we had some changes
+	return newLocation //  we had some changes
 }
 
 func init() {
