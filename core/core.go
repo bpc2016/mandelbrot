@@ -20,7 +20,6 @@ import (
 	"image/color"
 	"image/draw"
 	"image/png"
-	//"io"
 	"mandelbrot/math"
 	"mandelbrot/rgba"
 	"mandelbrot/ui"
@@ -80,7 +79,6 @@ func PartialFrom(position int) ([]byte, int) {
 func encoded(image *image.RGBA) []byte {
 	// generate PNG
 	bufIn := new(bytes.Buffer)
-	// png.Encode(io.Writer(bufIn), image) // NOTE: ignoring errors, to an io.Writer
 	png.Encode(bufIn, image) // NOTE: ignoring errors, to an io.Writer
 
 	// convert to Base64
